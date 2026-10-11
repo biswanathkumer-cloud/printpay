@@ -11,7 +11,7 @@
 <section class="hero">
   <div class="eyebrow">FAST • SIMPLE • MOBILE FRIENDLY</div>
   <h1>Upload → Pay → Print</h1>
-  <p>Send your images or PDFs, choose print settings, pay securely, then print or save your PDF.</p>
+  <p>QR scan করুন → document upload করুন → counter-এ payment দিন → owner approve করলে আপনার file Print Station-এ direct print হবে।</p>
   <div class="steps"><span>01 Upload</span><i>→</i><span>02 Pay</span><i>→</i><span>03 Print</span></div>
 </section>
 <main>
@@ -30,9 +30,9 @@
 </section>
 
 <section class="card price-card">
-<h2>💳 Payment</h2><div class="price"><span>Estimated amount</span><b id="amount">₹0</b></div>
-<div class="paygrid single"><button id="cash">💵 Counter Payment Received</button></div>
-<div id="qrBox" class="qrbox hidden"><div><b>Pay with UPI QR</b><p>Scan this QR using your UPI app, then continue with online payment.</p></div><img id="qr" alt="UPI QR"><button id="printQR" class="secondary">🖨️ Print QR</button></div>
+<h2>💳 Payment</h2><div class="price"><span>Estimated amount</span><b id="amount">₹0</b></div><div id="rateInfo" class="hint" style="margin-top:6px"></div>
+<div class="paygrid single"><button id="cash">💵 Counter Payment</button></div>
+
 <p class="hint">Counter payment only. Owner payment received করার পর printing চালু হবে।</p>
 </section>
 
@@ -42,7 +42,7 @@
 </section>
 </main>
 <footer>PrintPay • Secure order verification • D1 powered</footer>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+<script type="module">import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs"; window.pdfjsLib=pdfjsLib;</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="/app.js"></script>
 </body></html>

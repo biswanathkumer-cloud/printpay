@@ -36,30 +36,37 @@ async function createOrder(payment_method){
   const d=await r.json(); if(!r.ok||!d.ok){alert(d.error||'Could not create order');return null}
   orderId=d.order_id; return d;
 }
-$('online').onclick=async()=>{
-  const d=await createOrder('razorpay'); if(!d)return;
-  const options={key:d.key_id,amount:d.amount*100,currency:'INR',name:settings.business_name||'PrintPay',description:'Print order '+d.order_id,order_id:d.razorpay_order_id,prefill:{name:$('name').value,mobile:$('mobile').value},handler:async response=>{
-    const r=await fetch('/api/payment/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...response,order_id:d.order_id})});
-    const v=await r.json(); if(v.ok){paid=true;showReady('Online payment verified successfully.')}else alert(v.error||'Payment verification failed');
-  }};
-  new Razorpay(options).open();
-};
 $('cash').onclick=async()=>{
   const d=await createOrder('cash'); if(!d)return;
-  showReady('Cash Counter order created. Please pay at the counter. Printing unlocks after owner confirms cash received.');
-  paid=false;
+  paid=false; window.currentAmount=d.amount;
+  showReady('Counter order created. Please pay at the counter.');
+  speakAmount(d.amount);
 };
-function showReady(msg){$('result').classList.remove('hidden');$('resultText').innerHTML=`<b>Order ID:</b> ${orderId}<br><span>${msg}</span>`}
-async function imageToCanvas(file){
-  const img=new Image(); img.src=URL.createObjectURL(file); await img.decode();
-  const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
-  const x=c.getContext('2d'); x.filter=`brightness(${100+Number($('brightness').value)}%) contrast(${100+Number($('contrast').value)}%)`; x.drawImage(img,0,0);
-  if(mode()==='bw'||$('bwClean').checked){
-    const d=x.getImageData(0,0,c.width,c.height), a=d.data;
-    for(let i=0;i<a.length;i+=4){const y=.299*a[i]+.587*a[i+1]+.114*a[i+2];a[i]=a[i+1]=a[i+2]=y}
-    x.putImageData(d,0,0);
-  }
-  return c;
+function showReady(msg){
+  $('result').classList.remove('hidden');
+  $('resultText').innerHTML=`<b>Order ID:</b> ${orderId}<br><b>Amount:</b> ₹${window.currentAmount||calc().total}<br><span>${msg}</span><div id="paymentState" style="margin-top:8px;font-weight:800;color:#b45309">⏳ Counter payment pending</div>`;
+  startPaymentPolling();
+}
+function speakAmount(amount){
+  if(!('speechSynthesis' in window)) return;
+  const u=new SpeechSynthesisUtterance(`আপনি আপনার ${amount} টাকা সংগ্রহ করুন`);
+  u.lang='bn-IN'; u.rate=.9; u.pitch=1;
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
+let pollTimer=null;
+function startPaymentPolling(){
+  clearInterval(pollTimer);
+  pollTimer=setInterval(async()=>{
+    if(!orderId)return;
+    const r=await fetch('/api/order/status?id='+encodeURIComponent(orderId));
+    const d=await r.json();
+    if(d.ok && d.order.payment_status==='PAID'){
+      clearInterval(pollTimer); paid=true;
+      $('paymentState').textContent='✅ Payment Received — Print Ready';
+      $('paymentState').style.color='#15803d';
+      speakAmount(Number(d.order.amount_paise)/100);
+    }
+  },3000);
 }
 async function makePdf(){
   if(!paid){alert('Payment must be completed and verified before printing. Cash orders unlock after owner approval.');return null}

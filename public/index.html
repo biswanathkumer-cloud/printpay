@@ -31,9 +31,9 @@
 
 <section class="card price-card">
 <h2>💳 Payment</h2><div class="price"><span>Estimated amount</span><b id="amount">₹0</b></div>
-<div class="paygrid"><button id="online">⚡ Pay Online</button><button id="cash">💵 Cash Counter</button></div>
+<div class="paygrid single"><button id="cash">💵 Counter Payment Received</button></div>
 <div id="qrBox" class="qrbox hidden"><div><b>Pay with UPI QR</b><p>Scan this QR using your UPI app, then continue with online payment.</p></div><img id="qr" alt="UPI QR"><button id="printQR" class="secondary">🖨️ Print QR</button></div>
-<p class="hint">Online payment is verified on the server. Cash orders stay pending until the owner marks cash received.</p>
+<p class="hint">Counter payment only. Owner payment received করার পর printing চালু হবে।</p>
 </section>
 
 <section id="result" class="card result hidden">
@@ -42,7 +42,6 @@
 </section>
 </main>
 <footer>PrintPay • Secure order verification • D1 powered</footer>
-<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="/app.js"></script>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5b4bdb"><link rel="manifest" href="/manifest.json">
+<title>PrintPay — Upload • Pay • Print</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header><div class="brand"><span class="brand-mark">✦</span><b id="brandName">PrintPay</b><span class="mini">PRINT • PAY • GO</span></div><a href="/owner.html">🛡️ Owner</a></header>
+<section class="hero">
+  <div class="eyebrow">FAST • SIMPLE • MOBILE FRIENDLY</div>
+  <h1>Upload → Pay → Print</h1>
+  <p>Send your images or PDFs, choose print settings, pay securely, then print or save your PDF.</p>
+  <div class="steps"><span>01 Upload</span><i>→</i><span>02 Pay</span><i>→</i><span>03 Print</span></div>
+</section>
+<main>
+<section class="card">
+<h2>📄 Your files</h2>
+<label class="upload"><input id="files" type="file" accept="image/*,application/pdf" multiple><strong>Tap to choose images / PDFs</strong><small>Multiple files supported • JPG, PNG, WEBP, PDF</small></label>
+<div id="fileList" class="file-list"></div>
+</section>
+
+<section class="card">
+<h2>👤 Customer details</h2>
+<div class="grid2"><label>Name<input id="name" placeholder="Your name"></label><label>Mobile<input id="mobile" inputmode="numeric" placeholder="10 digit mobile"></label></div>
+<div class="grid2"><label>Paper<select id="paper"><option>A4</option><option>A3</option><option>Legal</option></select></label><label>Copies<input id="copies" type="number" min="1" value="1"></label></div>
+<div class="mode"><label><input type="radio" name="mode" value="bw" checked> 🖤 B&W</label><label><input type="radio" name="mode" value="color"> 🌈 Colour</label></div>
+<div class="tools"><b>✨ Print cleanup</b><div class="grid3"><label>Brightness<input id="brightness" type="range" min="-40" max="40" value="0"></label><label>Contrast<input id="contrast" type="range" min="-40" max="40" value="0"></label><label>Sharpness<input id="sharpness" type="range" min="0" max="2" step=".1" value="0"></label></div><label class="check"><input id="bwClean" type="checkbox"> Extra B&W cleanup</label></div>
+</section>
+
+<section class="card price-card">
+<h2>💳 Payment</h2><div class="price"><span>Estimated amount</span><b id="amount">₹0</b></div>
+<div class="paygrid"><button id="online">⚡ Pay Online</button><button id="cash">💵 Cash Counter</button></div>
+<div id="qrBox" class="qrbox hidden"><div><b>Pay with UPI QR</b><p>Scan this QR using your UPI app, then continue with online payment.</p></div><img id="qr" alt="UPI QR"><button id="printQR" class="secondary">🖨️ Print QR</button></div>
+<p class="hint">Online payment is verified on the server. Cash orders stay pending until the owner marks cash received.</p>
+</section>
+
+<section id="result" class="card result hidden">
+<h2>✅ Order ready</h2><div id="resultText"></div>
+<div class="paygrid"><button id="makePdf">📑 Create PDF</button><button id="printPdf">🖨️ Print</button><button id="savePdf">⬇️ Save PDF</button></div>
+</section>
+</main>
+<footer>PrintPay • Secure order verification • D1 powered</footer>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/app.js"></script>
+</body></html>

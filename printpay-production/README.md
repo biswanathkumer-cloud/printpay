@@ -1,63 +1,23 @@
-# PrintPay Production — Colorful Cloudflare Build
+# PrintPay Final - Counter Payment + QR Upload + Desktop Auto Print
 
-## Included
-- Mobile + desktop customer portal
-- Multiple image/PDF selection
-- Image/PDF preview and page counting
-- B&W / color print mode
-- Brightness / contrast / sharpness-style cleanup controls
-- Image to PDF and multiple files to one PDF
-- Counter payment received flow with Bengali voice announcement
-- Owner login
-- D1 order storage
-- Owner order dashboard
-- Owner pricing / delivery / QR settings
-- Printable customer QR
-- Browser Print / Save PDF
-- PWA manifest
+## Flow
+1. Customer scans `/poster.html` QR and opens the customer upload page.
+2. Customer selects image/PDF files. PDF page count is detected automatically.
+3. Customer chooses B&W/Colour and copies. Price = pages × copies × applicable quantity tier, then global discount and delivery are applied.
+4. Customer clicks **Counter Payment**. Order and source files are saved in D1/R2.
+5. Owner opens `/owner.html`, logs in, and clicks **Payment Received** for that order.
+6. Customer page detects PAID automatically, creates the final print PDF and uploads it.
+7. The Windows Desktop Agent polls for READY jobs and sends the final PDF to the default printer. Copies are printed automatically.
 
-## IMPORTANT
-This build keeps payment secrets server-side. Do NOT put Razorpay secret values in HTML/JS.
+## Quantity pricing
+Owner can set the per-page rate for `1+`, `5+`, `10+`, and `25+` copies. The highest matching non-zero tier is used. If a tier is 0, the normal B&W/Colour base price is used.
 
-## Cloudflare setup
-1. Create a D1 database named `printpay-db`.
-2. Create an R2 bucket named `printpay-files`.
-3. Put their IDs/names into `wrangler.toml`.
-4. Run:
-   npx wrangler d1 execute printpay-db --remote --file=./schema.sql
-5. Set Worker secrets:
-   ADMIN_INITIAL_PASSWORD
-   SESSION_SECRET
-   RAZORPAY_KEY_ID
-   RAZORPAY_KEY_SECRET
-   RAZORPAY_WEBHOOK_SECRET
-6. Deploy:
-   npx wrangler deploy
+## Desktop printing
+- Keep `/desktop.html` available for monitoring.
+- Run `desktop_agent.py` on the shop Windows PC with Python 3.10+.
+- Set `PRINTPAY_URL` to the deployed site URL.
+- Set `PRINTPAY_DESKTOP_KEY` to the same Desktop Print Key saved in Owner settings.
+- The PC must have a default PDF printer/application associated with the Windows `print` action.
 
-## Payment
-After deployment, set Razorpay webhook URL to:
-https://YOUR-WORKER-DOMAIN/api/razorpay/webhook
-
-Use the same webhook secret in Cloudflare:
-RAZORPAY_WEBHOOK_SECRET
-
-## Owner
-Open:
-https://YOUR-WORKER-DOMAIN/owner.html
-
-The initial owner username is:
-owner
-
-The password is the value of ADMIN_INITIAL_PASSWORD.
-
-## QR
-Owner can paste a public image URL in Owner Settings. The customer portal displays it and provides a Print QR button.
-
-## Notes
-- Browser printing uses the customer's available printer / OS print dialog.
-- Fully silent automatic Wi-Fi printing from a normal browser is not guaranteed; that requires a local print bridge or native printer integration.
-- Razorpay settlement timing is controlled by Razorpay/bank rules; the website verifies payment but cannot itself force bank settlement.
-
-
-## Counter-only payment
-Online payment has been removed from the customer flow. Customer creates a counter order. Owner receives cash and presses Payment Received in Owner Panel. After payment is marked received, the customer can print/save the PDF. Bengali voice announces: "আপনি আপনার টাকা সংগ্রহ করুন" with the order amount.
+## Cloudflare
+Set D1 and R2 IDs in `wrangler.toml`, run the schema on D1, and configure the `ADMIN_INITIAL_PASSWORD` secret. `SESSION_SECRET` is recommended.

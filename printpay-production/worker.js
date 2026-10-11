@@ -67,14 +67,6 @@ async function settings(env){
   return out;
 }
 function money(p){ return Math.round(Number(p||0)); }
-async function razorpay(env,path,method='GET',body=null){
-  const auth=btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`);
-  const r=await fetch('https://api.razorpay.com/v1'+path,{
-    method,headers:{'Authorization':`Basic ${auth}`,'Content-Type':'application/json'},
-    body:body?JSON.stringify(body):undefined
-  });
-  return {ok:r.ok,status:r.status,data:await r.json()};
-}
 async function markPaid(env,orderId,paymentId=null){
   await env.DB.prepare("UPDATE orders SET payment_status='PAID',order_status='READY',razorpay_payment_id=COALESCE(?,razorpay_payment_id),updated_at=? WHERE id=?")
     .bind(paymentId,now(),orderId).run();
@@ -137,44 +129,11 @@ export default {
         const discount=Math.max(0,Math.min(100,Number(s.global_discount||0)));
         const total=Math.max(0,Math.round(base*(1-discount/100)+Number(s.delivery||0)));
         const id='PP-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomUUID().slice(0,6).toUpperCase();
-        const method=b.payment_method==='cash'?'cash':'razorpay';
+        const method='cash';
         await env.DB.prepare(`INSERT INTO orders(id,customer_name,mobile,pages,copies,print_mode,paper,amount_paise,payment_method,payment_status,order_status,created_at,updated_at,utr,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
           .bind(id,name,mobile,pages,copies,mode,String(b.paper||'A4'),total*100,method,'PENDING','PENDING',now(),now(),String(b.utr||''),String(b.notes||'')).run();
 
-        if(method==='cash') return json({ok:true,order_id:id,amount:total,payment:'cash',payment_status:'PENDING'});
-        if(!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET) return json({ok:false,error:'Razorpay is not configured'},500);
-        const rz=await razorpay(env,'/orders','POST',{amount:total*100,currency:'INR',receipt:id,notes:{printpay_order_id:id}});
-        if(!rz.ok) return json({ok:false,error:'Razorpay order creation failed',details:rz.data},500);
-        await env.DB.prepare("UPDATE orders SET razorpay_order_id=?,updated_at=? WHERE id=?").bind(rz.data.id,now(),id).run();
-        return json({ok:true,order_id:id,amount:total,razorpay_order_id:rz.data.id,key_id:env.RAZORPAY_KEY_ID});
-      }
-
-      if(path==='/api/payment/verify' && req.method==='POST'){
-        const b=await req.json();
-        const order=await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(String(b.order_id)).first();
-        if(!order) return json({ok:false,error:'Order not found'},404);
-        const sig=await hmac(env.RAZORPAY_KEY_SECRET,`${b.razorpay_order_id}|${b.razorpay_payment_id}`);
-        if(sig!==b.razorpay_signature || order.razorpay_order_id!==b.razorpay_order_id) return json({ok:false,error:'Signature verification failed'},400);
-        const p=await razorpay(env,`/payments/${encodeURIComponent(b.razorpay_payment_id)}`);
-        if(!p.ok || p.data.status!=='captured' || Number(p.data.amount)!==Number(order.amount_paise)) return json({ok:false,error:'Payment not captured or amount mismatch'},400);
-        await markPaid(env,order.id,b.razorpay_payment_id);
-        return json({ok:true,paid:true,order_id:order.id});
-      }
-
-      if(path==='/api/razorpay/webhook' && req.method==='POST'){
-        const raw=await req.text();
-        if(env.RAZORPAY_WEBHOOK_SECRET){
-          const sig=await hmac(env.RAZORPAY_WEBHOOK_SECRET,raw);
-          if(sig!==(req.headers.get('X-Razorpay-Signature')||'')) return json({ok:false},400);
-        }
-        const e=JSON.parse(raw);
-        const p=e?.payload?.payment?.entity;
-        const oid=p?.order_id;
-        if(oid){
-          const order=await env.DB.prepare("SELECT id FROM orders WHERE razorpay_order_id=?").bind(oid).first();
-          if(order && ['payment.captured','order.paid'].includes(e.event)) await markPaid(env,order.id,p?.id||null);
-        }
-        return json({ok:true});
+        return json({ok:true,order_id:id,amount:total,payment:'cash',payment_status:'PENDING'});
       }
 
       if(path==='/api/order/status'){

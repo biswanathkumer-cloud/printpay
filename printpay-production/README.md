@@ -7,8 +7,7 @@
 - B&W / color print mode
 - Brightness / contrast / sharpness-style cleanup controls
 - Image to PDF and multiple files to one PDF
-- Razorpay online payment flow with server verification
-- Cash Counter pending-order flow
+- Counter payment received flow with Bengali voice announcement
 - Owner login
 - D1 order storage
 - Owner order dashboard
@@ -35,7 +34,7 @@ This build keeps payment secrets server-side. Do NOT put Razorpay secret values 
 6. Deploy:
    npx wrangler deploy
 
-## Razorpay webhook
+## Payment
 After deployment, set Razorpay webhook URL to:
 https://YOUR-WORKER-DOMAIN/api/razorpay/webhook
 
@@ -58,3 +57,7 @@ Owner can paste a public image URL in Owner Settings. The customer portal displa
 - Browser printing uses the customer's available printer / OS print dialog.
 - Fully silent automatic Wi-Fi printing from a normal browser is not guaranteed; that requires a local print bridge or native printer integration.
 - Razorpay settlement timing is controlled by Razorpay/bank rules; the website verifies payment but cannot itself force bank settlement.
+
+
+## Counter-only payment
+Online payment has been removed from the customer flow. Customer creates a counter order. Owner receives cash and presses Payment Received in Owner Panel. After payment is marked received, the customer can print/save the PDF. Bengali voice announces: "আপনি আপনার টাকা সংগ্রহ করুন" with the order amount.

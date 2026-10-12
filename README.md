@@ -1,28 +1,29 @@
-# PrintPay FINAL — Counter Payment + Direct Print (NO R2)
+# PrintPay FINAL v8 — Counter Payment + Storage-Free Direct Print
 
-This package fixes the Cloudflare error `binding DB of type d1 must have a valid database_id specified` without requiring you to manually copy a D1 UUID into the code.
+This build fixes the Cloudflare Durable Objects deployment error:
+`In order to use Durable Objects with a free plan, you must create a namespace using a new_sqlite_classes migration.`
 
-## Cloudflare Workers Builds
-Use:
+## Workers Builds settings
 - Build command: None
 - Deploy command: `node deploy.mjs`
 - Root directory: `/`
 
-`deploy.mjs` asks Wrangler for the existing D1 database named `printpay-db`, reads its real ID, generates a temporary Wrangler config, and deploys it. Cloudflare's Wrangler supports D1 resource discovery and D1 bindings require the database ID for a configured binding.
+## What this build uses
+- D1: only order/report data
+- Durable Object (SQLite-backed): temporary WebSocket relay for customer-to-shop direct print
+- Assets: website files
+- R2: NOT used
+- Razorpay/online payment: NOT used
 
-The Workers Build API token must have enough D1 permission to list the database. If `npx wrangler d1 list --json` is denied, add D1 Read permission to the Build API token.
-
-## Runtime secrets
-In Worker Settings > Variables and Secrets add:
+## Important secrets
+Add these under Worker Runtime Variables & Secrets after the Worker is deployed as real Worker code:
 - `ADMIN_INITIAL_PASSWORD`
 - `SESSION_SECRET`
 
-## D1 schema
-After the Worker deploys for the first time, run the included `schema.sql` against the remote `printpay-db` database if the tables do not already exist:
-`npx wrangler d1 execute printpay-db --remote --file=./schema.sql`
+## D1
+`deploy.mjs` automatically finds the existing D1 database named `printpay-db` and generates the real database binding before deploy.
 
-## No R2
-There is no R2 binding and no customer-file cloud storage. Customer files stay in the browser until the print transfer finishes.
+## Direct print
+The customer's browser keeps the page open while waiting for payment and printing. After the owner marks the cash order as Paid, the browser creates the PDF locally and sends it through the Durable Object WebSocket relay to the shop desktop agent. The desktop agent holds the PDF only temporarily while printing and deletes it afterwards.
 
-## Counter-only flow
-Customer uploads files -> browser calculates print amount -> customer creates cash order -> owner logs in and clicks Payment Received -> browser sends the temporary print PDF through the Durable Object relay to the shop desktop agent -> agent prints -> temporary local file is deleted -> D1 keeps only report/order information.
+No customer PDF/image is stored permanently in R2 or D1.

@@ -1,0 +1,10 @@
+{
+  "name": "printpay-production",
+  "private": true,
+  "scripts": {
+    "deploy": "node deploy.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.146.0"
+  }
+}

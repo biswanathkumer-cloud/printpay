@@ -13,7 +13,7 @@ required = ["ADMIN_INITIAL_PASSWORD", "SESSION_SECRET"]
 [[d1_databases]]
 binding = "DB"
 database_name = "printpay-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "f9e35aaa-b29c-425b-84d9-e67d83b40962"
 
 [[durable_objects.bindings]]
 name = "PRINT_ROOMS"

@@ -1,7 +1,3 @@
-# Do not deploy this file directly.
-# Workers Builds deploy command should be: node deploy.mjs
-# deploy.mjs finds the existing D1 database named printpay-db and generates
-# wrangler.generated.toml with the real database_id before deploying.
 name = "printpay"
 main = "worker.js"
 compatibility_date = "2026-10-01"
@@ -11,6 +7,10 @@ directory = "./public"
 binding = "ASSETS"
 run_worker_first = ["/api/*", "/ws/*"]
 
+[[d1_databases]]
+binding = "DB"
+database_name = "printpay-db"
+database_id = "f9e35aaa-b29c-425b-84d9-e67d83b40962"
 
 [[durable_objects.bindings]]
 name = "PRINT_ROOMS"

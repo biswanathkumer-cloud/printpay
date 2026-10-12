@@ -1,0 +1,58 @@
+const te = new TextEncoder();
+function json(data,status=200,extra={}){return new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8',...extra}})}
+function now(){return new Date().toISOString()}
+function b64(buf){return btoa(String.fromCharCode(...new Uint8Array(buf)))}
+async function hmac(secret,text){const k=await crypto.subtle.importKey('raw',te.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);return b64(await crypto.subtle.sign('HMAC',k,te.encode(text)))}
+async function pbkdf2(password,salt){const k=await crypto.subtle.importKey('raw',te.encode(password),'PBKDF2',false,['deriveBits']);return b64(await crypto.subtle.deriveBits({name:'PBKDF2',salt:te.encode(salt),iterations:100000,hash:'SHA-256'},k,256))}
+async function ensureSchema(env){
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS owners(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,password_salt TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)').run();
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)').run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY,customer_name TEXT NOT NULL,mobile TEXT NOT NULL,pages INTEGER NOT NULL DEFAULT 1,copies INTEGER NOT NULL DEFAULT 1,print_mode TEXT NOT NULL DEFAULT 'bw',paper TEXT NOT NULL DEFAULT 'A4',amount_paise INTEGER NOT NULL DEFAULT 0,payment_method TEXT NOT NULL DEFAULT 'cash',payment_status TEXT NOT NULL DEFAULT 'PENDING',order_status TEXT NOT NULL DEFAULT 'PENDING',file_key TEXT,upload_token_hash TEXT,utr TEXT,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)").run();
+}
+async function ensureSettings(env){const d={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',desktop_key:''};for(const [k,v] of Object.entries(d))await env.DB.prepare('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,v,now()).run()}
+async function initOwner(env){await ensureSchema(env);await ensureSettings(env);const r=await env.DB.prepare("SELECT id FROM owners WHERE username='owner'").first();if(r||!env.ADMIN_INITIAL_PASSWORD)return;const salt=crypto.randomUUID();const hash=await pbkdf2(env.ADMIN_INITIAL_PASSWORD,salt);await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run()}
+async function makeSession(env){const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;if(!secret)throw new Error('SESSION_SECRET or ADMIN_INITIAL_PASSWORD is required');const payload=`${Date.now()}.${crypto.randomUUID()}`;const sig=await hmac(secret,payload);return `pp_session=${encodeURIComponent(payload+'.'+sig)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`}
+async function isOwner(req,env){const c=req.headers.get('Cookie')||'';const m=c.match(/(?:^|;\s*)pp_session=([^;]+)/);if(!m)return false;const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;if(!secret)return false;const raw=decodeURIComponent(m[1]);const p=raw.split('.');if(p.length<3)return false;const payload=p.slice(0,2).join('.'),sig=p.slice(2).join('.');const ts=Number(p[0]);if(!ts||Date.now()-ts>86400000)return false;return (await hmac(secret,payload))===sig}
+async function settings(env){await ensureSettings(env);const rs=await env.DB.prepare('SELECT key,value FROM settings').all();const o={};for(const r of rs.results)o[r.key]=r.value;return o}
+async function publicSettings(env){const s=await settings(env);delete s.desktop_key;return s}
+async function markPaid(env,id){await env.DB.prepare("UPDATE orders SET payment_status='PAID',order_status='READY',updated_at=? WHERE id=?").bind(now(),id).run()}
+async function desktopOK(req,env){const key=req.headers.get('x-desktop-key')||'';const s=await settings(env);return !!key&&!!s.desktop_key&&key===s.desktop_key}
+function roomId(env,id){return env.PRINT_ROOMS.idFromName(String(id))}
+async function roomStub(env,id){return env.PRINT_ROOMS.get(roomId(env,id))}
+
+export default {async fetch(req,env){try{await initOwner(env);const u=new URL(req.url),p=u.pathname;
+if(p==='/api/health')return json({ok:true,service:'PrintPay',storage:'none',time:now()});
+if(p==='/api/public-settings')return json(await publicSettings(env));
+if(p.startsWith('/ws/order/')){const id=decodeURIComponent(p.slice('/ws/order/'.length));const row=await env.DB.prepare('SELECT id,payment_status FROM orders WHERE id=?').bind(id).first();if(!row)return json({ok:false,error:'Order not found'},404);if(row.payment_status!=='PAID')return json({ok:false,error:'Payment not received'},403);return roomStub(env,id).fetch(new Request(u,{method:req.method,headers:req.headers,body:req.body}));}
+if(p==='/ws/desktop'){if(!await desktopOK(req,env))return json({ok:false,error:'Invalid desktop key'},401);const id=u.searchParams.get('order_id');if(!id)return json({ok:false,error:'order_id required'},400);return roomStub(env,id).fetch(new Request(u,{method:req.method,headers:req.headers,body:req.body}));}
+if(p==='/api/owner/login'&&req.method==='POST'){const b=await req.json();if(!env.ADMIN_INITIAL_PASSWORD)return json({ok:false,error:'Owner password secret is not configured yet. Add ADMIN_INITIAL_PASSWORD in Worker Variables & Secrets.'},503);const username=String(b.username||'').trim();const password=String(b.password||'');if(username!=='owner'||!password)return json({ok:false,error:'Invalid login'},401);let row=await env.DB.prepare('SELECT * FROM owners WHERE username=?').bind(username).first();let valid=false;if(row){valid=(await pbkdf2(password,row.password_salt))===row.password_hash;}if(!valid && password===env.ADMIN_INITIAL_PASSWORD){const salt=crypto.randomUUID();const hash=await pbkdf2(env.ADMIN_INITIAL_PASSWORD,salt);if(row){await env.DB.prepare('UPDATE owners SET password_hash=?,password_salt=?,updated_at=? WHERE username=?').bind(hash,salt,now(),username).run();}else{await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run();}valid=true;}if(!valid)return json({ok:false,error:'Invalid login'},401);return json({ok:true},{'Set-Cookie':await makeSession(env)})}
+if(p==='/api/owner/logout')return json({ok:true},{'Set-Cookie':'pp_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'});
+if(p==='/api/owner/settings'&&req.method==='GET'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);return json(await settings(env))}
+if(p==='/api/owner/settings'&&req.method==='POST'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);const b=await req.json();for(const[k,v]of Object.entries(b)){if(k==='session')continue;await env.DB.prepare('INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,String(v??''),now()).run()}return json({ok:true,settings:await settings(env)})}
+if(p==='/api/owner/orders'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);const rs=await env.DB.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT 1000').all();return json(rs.results)}
+if(p==='/api/owner/cash-paid'&&req.method==='POST'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);const b=await req.json();const id=String(b.order_id||'');if(!id)return json({ok:false,error:'Order ID required'},400);const row=await env.DB.prepare("SELECT id,amount_paise,payment_status FROM orders WHERE id=? AND payment_method='cash'").bind(id).first();if(!row)return json({ok:false,error:'Cash order not found'},404);if(row.payment_status!=='PAID')await markPaid(env,id);return json({ok:true,order_id:id,amount:Number(row.amount_paise||0)/100,payment_status:'PAID',order_status:'READY'})}
+if(p==='/api/order/create'&&req.method==='POST'){const b=await req.json(),name=String(b.customer_name||'').trim(),mobile=String(b.mobile||'').trim();if(!name||mobile.length<10)return json({ok:false,error:'Name and valid mobile required'},400);const s=await settings(env);const pages=Math.max(1,Number(b.pages||1)),copies=Math.max(1,Number(b.copies||1)),mode=b.print_mode==='color'?'color':'bw';const baseRate=mode==='color'?Number(s.price_color):Number(s.price_bw);let tierRate=baseRate;if(copies>=25&&Number(s.tier_25)>0)tierRate=Number(s.tier_25);else if(copies>=10&&Number(s.tier_10)>0)tierRate=Number(s.tier_10);else if(copies>=5&&Number(s.tier_5)>0)tierRate=Number(s.tier_5);else if(copies>=1&&Number(s.tier_1)>0)tierRate=Number(s.tier_1);let total=tierRate*pages*copies;const discount=Math.max(0,Math.min(100,Number(s.global_discount||0)));total=Math.max(0,Math.round(total*(1-discount/100)+Number(s.delivery||0)));const id='PP-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomUUID().slice(0,6).toUpperCase();await env.DB.prepare(`INSERT INTO orders(id,customer_name,mobile,pages,copies,print_mode,paper,amount_paise,payment_method,payment_status,order_status,created_at,updated_at,utr,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,name,mobile,pages,copies,mode,String(b.paper||'A4'),total*100,'cash','PENDING','PENDING',now(),now(),'','').run();return json({ok:true,order_id:id,amount:total})}
+if(p==='/api/desktop/jobs'){if(!await desktopOK(req,env))return json({ok:false,error:'Invalid desktop key'},401);const rs=await env.DB.prepare("SELECT * FROM orders WHERE payment_status='PAID' AND order_status IN ('READY','PRINTING') ORDER BY created_at ASC LIMIT 50").all();return json({ok:true,jobs:rs.results})}
+if(p==='/api/order/status'){const id=u.searchParams.get('id');const row=await env.DB.prepare('SELECT id,customer_name,mobile,pages,copies,print_mode,paper,amount_paise,payment_method,payment_status,order_status,created_at,updated_at FROM orders WHERE id=?').bind(id).first();if(!row)return json({ok:false,error:'Not found'},404);return json({ok:true,order:row})}
+if(p==='/api/desktop/printed'&&req.method==='POST'){if(!await desktopOK(req,env))return json({ok:false,error:'Invalid desktop key'},401);const b=await req.json();await env.DB.prepare("UPDATE orders SET order_status='PRINTED',updated_at=? WHERE id=?").bind(now(),String(b.order_id)).run();return json({ok:true})}
+return env.ASSETS.fetch(req);
+}catch(e){return json({ok:false,error:e?.message||String(e)},500)}}};
+
+export class PrintRoom {
+  constructor(state, env){this.state=state;this.env=env;this.customer=null;this.desktop=null;}
+  async fetch(req){
+    if(req.headers.get('Upgrade')!=='websocket') return new Response('WebSocket required',{status:426});
+    const pair=new WebSocketPair();const client=pair[0],server=pair[1];server.accept();
+    server._role=null;
+    server.addEventListener('message',evt=>{try{
+      if(typeof evt.data==='string'){
+        const m=JSON.parse(evt.data);if(m.type==='hello'){server._role=m.role;if(m.role==='customer')this.customer=server; if(m.role==='desktop')this.desktop=server; server.send(JSON.stringify({type:'ready',role:m.role})); return;}
+        if(m.type==='done'){if(this.customer&&this.customer.readyState===1)this.customer.send(JSON.stringify({type:'printed'}));return;}
+      }
+      if(server._role==='customer'&&this.desktop&&this.desktop.readyState===1)this.desktop.send(evt.data);
+      else if(server._role==='desktop'&&this.customer&&this.customer.readyState===1)this.customer.send(evt.data);
+    }catch(e){server.close(1011,'relay error')}});
+    server.addEventListener('close',()=>{if(this.customer===server)this.customer=null;if(this.desktop===server)this.desktop=null});
+    return new Response(null,{status:101,webSocket:client});
+  }
+}

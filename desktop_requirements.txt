@@ -1,3 +1,0 @@
-# Bundled in lib/ for offline startup. Kept only as a reference for manual installs.
-requests>=2.32.0
-websocket-client>=1.8.0

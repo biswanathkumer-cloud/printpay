@@ -3,17 +3,27 @@
 import os,time,tempfile,threading,requests,websocket
 BASE_URL=os.environ.get('PRINTPAY_URL','https://YOUR-PRINTPAY-URL').rstrip('/')
 DESKTOP_KEY=os.environ.get('PRINTPAY_DESKTOP_KEY','CHANGE-ME-PRINTPAY')
-seen=set(); active=set()
+seen=set(); active=set(); printer_cfg={'bw_printer':'','color_printer':'','auto_print':True}
 
 def ws_url(order_id):
     return BASE_URL.replace('https://','wss://').replace('http://','ws://')+f'/ws/desktop?order_id={order_id}'
 
-def print_file(path,copies):
-    # Uses Windows' registered PDF Print verb. For silent printing, install a PDF reader
-    # that exposes a Print verb (e.g. Adobe Reader). No cloud storage is used.
-    for _ in range(max(1,int(copies or 1))):
-        os.startfile(path,'print')
-        time.sleep(2.5)
+def refresh_printer_cfg():
+    global printer_cfg
+    try:
+        r=requests.get(BASE_URL+'/api/desktop/settings',headers={'x-desktop-key':DESKTOP_KEY},timeout=20);r.raise_for_status();printer_cfg=r.json() or printer_cfg
+    except Exception as e: print('Printer settings:',e)
+
+def print_file(path,copies,mode):
+    printer=printer_cfg.get('color_printer' if mode=='color' else 'bw_printer','') or ''
+    if printer:
+        for _ in range(max(1,int(copies or 1))):
+            os.startfile(path,'printto',printer)
+            time.sleep(3)
+    else:
+        for _ in range(max(1,int(copies or 1))):
+            os.startfile(path,'print')
+            time.sleep(2.5)
 
 def handle_job(job):
     oid=job['id']; active.add(oid); path=None
@@ -38,7 +48,7 @@ def handle_job(job):
         if not data or (expected and len(data)!=expected): raise RuntimeError(f'incomplete print file ({len(data)}/{expected})')
         fd,path=tempfile.mkstemp(prefix='PrintPay-',suffix='.pdf');os.close(fd)
         with open(path,'wb') as f:f.write(data)
-        print_file(path,job.get('copies',1))
+        print_file(path,job.get('copies',1),job.get('print_mode','bw'))
         requests.post(BASE_URL+'/api/desktop/printed',headers={'x-desktop-key':DESKTOP_KEY,'content-type':'application/json'},json={'order_id':oid},timeout=20).raise_for_status()
         try: ws.send('{"type":"done"}')
         except: pass
@@ -54,6 +64,10 @@ def main():
     print('PrintPay Direct Print Agent started. R2/storage is NOT used.')
     while True:
         try:
+            refresh_printer_cfg()
+            if not printer_cfg.get('auto_print', True):
+                time.sleep(3)
+                continue
             r=requests.get(BASE_URL+'/api/desktop/jobs',headers={'x-desktop-key':DESKTOP_KEY},timeout=30);r.raise_for_status()
             for job in r.json().get('jobs',[]):
                 oid=job['id']

@@ -1,5 +1,5 @@
 {
-  "name": "printpay-counter-only-v13",
+  "name": "printpay-counter-only-v16",
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy"

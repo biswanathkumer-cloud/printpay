@@ -1,1 +1,0 @@
-PrintPay v19 fixes: customer amount calculation initialization/JS crash, one Bengali order voice, no payment voice, printer detection fallback, printer settings visibility, simplified cleanup editor with live preview.

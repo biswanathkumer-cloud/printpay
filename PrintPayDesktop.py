@@ -3,6 +3,10 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
 import requests, websocket
+try:
+    import win32print
+except Exception:
+    win32print = None
 
 APP_NAME='PrintPay Desktop'
 CONFIG=os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'PrintPayDesktop', 'config.json')
@@ -81,6 +85,8 @@ class App:
         ttk.Checkbutton(row,text='Automatic Print',variable=self.auto).pack(side='left',padx=8)
         ttk.Button(row,text='💾 Save',command=self.save_station_settings).pack(side='right')
         self.info=ttk.Label(st,text=''); self.info.pack(anchor='w',pady=(6,0))
+        if not self.bw.get() and not self.col.get():
+            self.info.config(text='No printer detected. Click 🔄 Detect Printers. If still empty, install/restart PrintPay Desktop.')
         cols=('time','id','name','mobile','pages','copies','mode','amount','payment','status','action')
         self.tree=ttk.Treeview(self.root,columns=cols,show='headings',height=20)
         heads={'time':'Date/Time','id':'Order ID','name':'Name','mobile':'Mobile','pages':'Pages','copies':'Copies','mode':'Mode','amount':'Amount','payment':'Payment','status':'Status','action':'Action'}
@@ -94,26 +100,41 @@ class App:
 
     def list_printers(self):
         vals=[]
-        commands=[
-            "Get-Printer -ErrorAction SilentlyContinue | ForEach-Object {$_.Name}",
-            "Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue | ForEach-Object {$_.Name}",
-            "Get-WmiObject Win32_Printer -ErrorAction SilentlyContinue | ForEach-Object {$_.Name}"
-        ]
-        for cmd in commands:
+        # Preferred: native Windows print API via pywin32. This is much more
+        # reliable than parsing PowerShell output.
+        if win32print is not None:
             try:
-                r=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',cmd],capture_output=True,text=True,timeout=10)
+                flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+                for item in win32print.EnumPrinters(flags):
+                    name = item[2]
+                    if name and name not in vals:
+                        vals.append(name)
+            except Exception:
+                pass
+        # Fallbacks for machines where pywin32 is unavailable.
+        commands=[
+            ["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",
+             "Get-Printer -ErrorAction Stop | Select-Object -ExpandProperty Name"],
+            ["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",
+             "Get-CimInstance Win32_Printer -ErrorAction Stop | Select-Object -ExpandProperty Name"]
+        ]
+        for args in commands:
+            try:
+                r=subprocess.run(args,capture_output=True,text=True,timeout=12)
                 for x in r.stdout.splitlines():
                     x=x.strip()
                     if x and x not in vals: vals.append(x)
                 if vals: break
-            except Exception: pass
+            except Exception:
+                pass
         if not vals:
             try:
                 r=subprocess.run(['wmic','printer','get','name'],capture_output=True,text=True,timeout=10)
                 for x in r.stdout.splitlines()[1:]:
                     x=x.strip()
                     if x and x not in vals: vals.append(x)
-            except Exception: pass
+            except Exception:
+                pass
         self.printers=vals
         return vals
     def refresh_printer_list(self):

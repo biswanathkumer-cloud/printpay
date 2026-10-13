@@ -1,12 +1,8 @@
-import os, json, time, tempfile, threading, subprocess, queue
+import os, json, time, tempfile, threading, subprocess, queue, ctypes, ctypes.wintypes as wintypes, platform
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
 import requests, websocket
-try:
-    import win32print
-except Exception:
-    win32print = None
 
 APP_NAME='PrintPay Desktop'
 CONFIG=os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'PrintPayDesktop', 'config.json')
@@ -99,34 +95,44 @@ class App:
         self.update_info()
 
     def list_printers(self):
+        """Return Windows-installed printers, including USB, Wi-Fi and LAN queues.
+        Uses Winspool.EnumPrinters directly first, so no pywin32 package is required.
+        """
         vals=[]
-        # Preferred: native Windows print API via pywin32. This is much more
-        # reliable than parsing PowerShell output.
-        if win32print is not None:
+        if os.name == 'nt':
             try:
-                flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
-                for item in win32print.EnumPrinters(flags):
-                    name = item[2]
-                    if name and name not in vals:
-                        vals.append(name)
+                winspool=ctypes.WinDLL('winspool.drv')
+                EnumPrintersW=winspool.EnumPrintersW
+                EnumPrintersW.argtypes=[wintypes.DWORD,wintypes.LPWSTR,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.POINTER(wintypes.DWORD)]
+                EnumPrintersW.restype=wintypes.BOOL
+                class PRINTER_INFO_4W(ctypes.Structure):
+                    _fields_=[('pPrinterName',wintypes.LPWSTR),('pServerName',wintypes.LPWSTR),('Attributes',wintypes.DWORD)]
+                flags=0x00000002 | 0x00000004  # LOCAL + CONNECTIONS
+                needed=wintypes.DWORD(0); returned=wintypes.DWORD(0)
+                EnumPrintersW(flags,None,4,None,0,ctypes.byref(needed),ctypes.byref(returned))
+                if needed.value:
+                    buf=ctypes.create_string_buffer(needed.value)
+                    if EnumPrintersW(flags,None,4,buf,needed.value,ctypes.byref(needed),ctypes.byref(returned)):
+                        arr=ctypes.cast(buf,ctypes.POINTER(PRINTER_INFO_4W))
+                        for i in range(returned.value):
+                            name=arr[i].pPrinterName
+                            if name and name not in vals: vals.append(name)
             except Exception:
                 pass
-        # Fallbacks for machines where pywin32 is unavailable.
-        commands=[
-            ["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",
-             "Get-Printer -ErrorAction Stop | Select-Object -ExpandProperty Name"],
-            ["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",
-             "Get-CimInstance Win32_Printer -ErrorAction Stop | Select-Object -ExpandProperty Name"]
-        ]
-        for args in commands:
+        # PowerShell fallback also catches printers installed through network discovery.
+        for cmd in [
+            'Get-Printer -ErrorAction Stop | Select-Object -ExpandProperty Name',
+            'Get-CimInstance Win32_Printer -ErrorAction Stop | Select-Object -ExpandProperty Name'
+        ]:
             try:
-                r=subprocess.run(args,capture_output=True,text=True,timeout=12)
+                r=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',cmd],capture_output=True,text=True,timeout=12)
                 for x in r.stdout.splitlines():
                     x=x.strip()
                     if x and x not in vals: vals.append(x)
                 if vals: break
             except Exception:
                 pass
+        # Legacy fallback for older Windows environments.
         if not vals:
             try:
                 r=subprocess.run(['wmic','printer','get','name'],capture_output=True,text=True,timeout=10)
@@ -150,19 +156,18 @@ class App:
         if not printer:
             messagebox.showwarning('Printer', 'আগে B&W বা Colour Printer select/type করুন।')
             return
-        path=None
+        if os.name != 'nt':
+            messagebox.showerror('Printer Test','এই test Windows PC-তে চালাতে হবে।')
+            return
         try:
-            fd,path=tempfile.mkstemp(prefix='PrintPay-Test-',suffix='.txt');os.close(fd)
-            with open(path,'w',encoding='utf-8') as f:
-                f.write('PrintPay Printer Test\n\nএই পেজটি শুধু printer setting পরীক্ষা করার জন্য।\n')
-            os.startfile(path,'printto',printer)
-            messagebox.showinfo('Printer Test', f'Test print পাঠানো হয়েছে:\n{printer}')
+            # Windows PrintUIEntry sends the printer's own test page and does not
+            # depend on a PDF/text viewer association.
+            r=subprocess.run(['rundll32.exe','printui.dll,PrintUIEntry','/k','/n',printer],capture_output=True,text=True,timeout=30)
+            if r.returncode != 0:
+                raise RuntimeError((r.stderr or r.stdout or f'Windows returned code {r.returncode}').strip())
+            messagebox.showinfo('Printer Test', f'Windows test page পাঠানো হয়েছে:\n{printer}')
         except Exception as e:
-            messagebox.showerror('Printer Test', f'Printer কাজ করছে না বা নামটি ভুল:\n{printer}\n\n{e}')
-        finally:
-            if path:
-                try: os.remove(path)
-                except: pass
+            messagebox.showerror('Printer Test', f'Windows printer test পাঠানো যায়নি:\n{printer}\n\n{e}')
 
     def update_info(self):
         bw=self.settings.get('bw_printer') or 'Default printer'; co=self.settings.get('color_printer') or 'Default printer'

@@ -1,52 +1,58 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title PrintPay Desktop Installer
+title PrintPay Desktop - Setup
 
-echo ========================================
-echo       PRINTPAY DESKTOP INSTALLER
-echo ========================================
-echo.
-
+:findpython
 set "PY="
 where py >nul 2>&1 && set "PY=py -3"
 if not defined PY where python >nul 2>&1 && set "PY=python"
 if not defined PY (
-  echo Python 3 is not installed.
-  echo Please install Python 3 from https://www.python.org/downloads/windows/
-  echo During installation tick: Add python.exe to PATH
-  pause
-  exit /b 1
+  echo.
+  echo Python 3 was not found on this PC.
+  echo.
+  where winget >nul 2>&1
+  if errorlevel 1 goto NOPYTHON
+  echo Trying to install Python 3 for this Windows user using winget...
+  winget install --id Python.Python.3.13 -e --scope user --accept-package-agreements --accept-source-agreements
+  echo.
+  echo Python installation command finished. Re-checking Python...
+  where py >nul 2>&1 && set "PY=py -3"
+  if not defined PY where python >nul 2>&1 && set "PY=python"
+  if not defined PY goto NOPYTHON
 )
 
-echo [1/3] Checking Python...
+echo [1/2] Python:
 %PY% --version
 if errorlevel 1 goto FAIL
 
-echo.
-echo [2/3] Installing PrintPay Desktop dependencies...
-%PY% -m pip install --upgrade pip
-if errorlevel 1 goto FAIL
-%PY% -m pip install -r desktop_requirements.txt
-if errorlevel 1 goto FAIL
+rem Use bundled libraries first. No pywin32 and no internet are required.
+set "PYTHONPATH=%~dp0lib"
 
-%PY% -c "import win32print; print('Windows printer API: OK')"
-if errorlevel 1 (
-  echo.
-  echo pywin32 printer support is missing. Retrying...
-  %PY% -m pip install --upgrade pywin32
-  %PY% -c "import win32print; print('Windows printer API: OK')"
-  if errorlevel 1 goto FAIL
-)
-
-echo.
-echo [3/3] Starting PrintPay Desktop...
+echo [2/2] Starting PrintPay Desktop...
 %PY% PrintPayDesktop.py
-exit /b %errorlevel%
+set "RC=%errorlevel%"
+if not "%RC%"=="0" goto FAILRUN
+exit /b %RC%
+
+:NOPYTHON
+echo.
+echo Python 3 could not be installed automatically.
+echo Install Python 3.13 for Windows, then run this installer again.
+echo Download: https://www.python.org/downloads/windows/
+echo During setup, enable "Add python.exe to PATH".
+pause
+exit /b 1
+
+:FAILRUN
+echo.
+echo PrintPay Desktop stopped with error code %RC%.
+echo The application window normally shows the exact error.
+pause
+exit /b %RC%
 
 :FAIL
 echo.
-echo INSTALLATION FAILED.
-echo Read the error above and make sure Windows is online.
+echo PrintPay Desktop could not start.
 pause
 exit /b 1

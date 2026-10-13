@@ -11,7 +11,7 @@ os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
 class App:
     def __init__(self, root):
         self.root=root; root.title(APP_NAME); root.geometry('1100x700'); root.minsize(900,560)
-        self.s=requests.Session(); self.base=''; self.desktop_key=''; self.settings={}; self.running=False; self.seen=set(); self.active=set(); self.q=queue.Queue()
+        self.s=requests.Session(); self.base=''; self.desktop_key=''; self.settings={}; self.running=False; self.seen=set(); self.active=set(); self.announced=set(); self.q=queue.Queue()
         self.build_login()
         root.after(300, self.drain_queue)
 
@@ -67,12 +67,13 @@ class App:
         self.status=ttk.Label(top,text='● Connected'); self.status.pack(side='left',padx=20)
         ttk.Button(top,text='Refresh',command=self.refresh_orders).pack(side='right')
         ttk.Button(top,text='Logout',command=self.logout).pack(side='right',padx=6)
-        st=ttk.LabelFrame(self.root,text='Print Station Settings',padding=10); st.pack(fill='x',padx=10,pady=5)
+        st=ttk.LabelFrame(self.root,text='Printer Settings',padding=10); st.pack(fill='x',padx=10,pady=5)
         row=ttk.Frame(st); row.pack(fill='x')
-        ttk.Label(row,text='B&W Printer').pack(side='left'); self.bw=ttk.Entry(row,width=28); self.bw.pack(side='left',padx=6); self.bw.insert(0,self.settings.get('bw_printer',''))
-        ttk.Label(row,text='Colour Printer').pack(side='left',padx=(14,0)); self.col=ttk.Entry(row,width=28); self.col.pack(side='left',padx=6); self.col.insert(0,self.settings.get('color_printer',''))
+        ttk.Label(row,text='B&W Printer').pack(side='left'); self.bw=ttk.Combobox(row,width=30,state='readonly'); self.bw.pack(side='left',padx=6); self.bw['values']=self.list_printers(); self.bw.set(self.settings.get('bw_printer','') or (self.bw['values'][0] if self.bw['values'] else ''))
+        ttk.Label(row,text='Colour Printer').pack(side='left',padx=(14,0)); self.col=ttk.Combobox(row,width=30,state='readonly'); self.col.pack(side='left',padx=6); self.col['values']=self.bw['values']; self.col.set(self.settings.get('color_printer','') or (self.col['values'][0] if self.col['values'] else ''))
+        ttk.Button(row,text='🔄 Detect Printers',command=self.refresh_printer_list).pack(side='left',padx=6)
         self.auto=tk.BooleanVar(value=self.settings.get('auto_print','1')!='0')
-        ttk.Checkbutton(row,text='Automatic Print',variable=self.auto).pack(side='left',padx=10)
+        ttk.Checkbutton(row,text='Automatic Print',variable=self.auto).pack(side='left',padx=8)
         ttk.Button(row,text='💾 Save',command=self.save_station_settings).pack(side='right')
         self.info=ttk.Label(st,text=''); self.info.pack(anchor='w',pady=(6,0))
         cols=('time','id','name','mobile','pages','copies','mode','amount','payment','status','action')
@@ -84,6 +85,20 @@ class App:
         self.tree.bind('<Double-1>',self.double_click)
         self.context=ttk.Label(self.root,text='Double-click a pending order to receive cash payment. Printing starts automatically when enabled.',padding=8)
         self.context.pack(fill='x')
+        self.update_info()
+
+    def list_printers(self):
+        try:
+            r=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command','Get-Printer | Select-Object -ExpandProperty Name'],capture_output=True,text=True,timeout=8)
+            vals=[x.strip() for x in r.stdout.splitlines() if x.strip()]
+            return vals
+        except Exception:return []
+    def refresh_printer_list(self):
+        vals=self.list_printers(); oldbw=self.bw.get(); oldco=self.col.get(); self.bw['values']=vals; self.col['values']=vals
+        if oldbw in vals:self.bw.set(oldbw)
+        elif vals:self.bw.set(vals[0])
+        if oldco in vals:self.col.set(oldco)
+        elif vals:self.col.set(vals[0])
         self.update_info()
 
     def update_info(self):
@@ -141,40 +156,56 @@ class App:
             try:
                 self.load_settings()
                 if self.auto.get():
-                    r=self.s.get(self.base+'/api/desktop/jobs',headers={'x-desktop-key':self.desktop_key},timeout=20);r.raise_for_status()
+                    r=self.s.get(self.base+'/api/desktop/jobs',headers={'x-desktop-key':self.desktop_key},timeout=8);r.raise_for_status()
                     for job in r.json().get('jobs',[]):
                         oid=job['id']
+                        if job.get('payment_status')=='PENDING' and oid not in self.announced:
+                            self.announced.add(oid)
+                            self.speak(f"গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। {job['amount_paise']/100:.2f} টাকা সংগ্রহ করে প্রিন্ট করে দিন।")
                         if oid not in self.seen and oid not in self.active:
                             self.active.add(oid); threading.Thread(target=self.handle_job,args=(job,),daemon=True).start()
                 self.q.put('refresh')
             except Exception:self.q.put('offline')
-            time.sleep(2)
+            time.sleep(1)
 
     def handle_job(self,job):
         oid=job['id']; path=None
         try:
-            ws=websocket.create_connection(self.base.replace('https://','wss://')+'/ws/desktop?order_id='+oid,header=[f'x-desktop-key: {self.desktop_key}'],timeout=30)
-            ws.send(json.dumps({'type':'hello','role':'desktop'})); chunks=[]; expected=0; started=False; deadline=time.time()+180
+            ws=websocket.create_connection(self.base.replace('https://','wss://')+'/ws/desktop?order_id='+oid,header=[f'x-desktop-key: {self.desktop_key}'],timeout=20)
+            ws.send(json.dumps({'type':'hello','role':'desktop'})); chunks=[]; expected=0; started=False; finished=False; paid=(job.get('payment_status')=='PAID'); deadline=time.time()+300
             while time.time()<deadline:
-                ws.settimeout(10)
+                ws.settimeout(5)
                 try: msg=ws.recv()
                 except websocket.WebSocketTimeoutException: continue
                 if isinstance(msg,str):
                     m=json.loads(msg)
                     if m.get('type')=='start': expected=int(m.get('size',0)); started=True
-                    elif m.get('type')=='end' and started: break
-                else: chunks.append(msg)
+                    elif m.get('type')=='paid': paid=True
+                    elif m.get('type')=='end' and started: finished=True
+                    elif m.get('type')=='printed': break
+                else:
+                    chunks.append(msg)
+                if finished and paid: break
             data=b''.join(chunks)
-            if not data or (expected and len(data)!=expected): raise RuntimeError('Incomplete print file')
+            if not data or (expected and len(data)!=expected): raise RuntimeError('Incomplete print file. Customer page must remain open.')
+            if not paid:
+                # Wait briefly for Owner payment approval without downloading again.
+                wait_until=time.time()+300
+                while time.time()<wait_until and not paid:
+                    ws.settimeout(2)
+                    try: msg=ws.recv()
+                    except websocket.WebSocketTimeoutException: continue
+                    if isinstance(msg,str) and json.loads(msg).get('type')=='paid': paid=True
+            if not paid: raise RuntimeError('Payment not received.')
             fd,path=tempfile.mkstemp(prefix='PrintPay-',suffix='.pdf');os.close(fd)
             with open(path,'wb') as f:f.write(data)
             mode=job.get('print_mode','bw'); printer=self.settings.get('color_printer' if mode=='color' else 'bw_printer','') or ''
             copies=max(1,int(job.get('copies',1)))
+            if not printer: raise RuntimeError('Printer not selected. Open Printer Settings and select a printer.')
             for _ in range(copies):
-                if printer: os.startfile(path,'printto',printer)
-                else: os.startfile(path,'print')
-                time.sleep(3)
-            self.s.post(self.base+'/api/desktop/printed',headers={'x-desktop-key':self.desktop_key},json={'order_id':oid},timeout=20).raise_for_status()
+                os.startfile(path,'printto',printer)
+                time.sleep(2)
+            self.s.post(self.base+'/api/desktop/printed',headers={'x-desktop-key':self.desktop_key},json={'order_id':oid},timeout=8).raise_for_status()
             try:ws.send(json.dumps({'type':'done'}))
             except:pass
             ws.close();self.seen.add(oid)

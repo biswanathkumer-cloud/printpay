@@ -41,3 +41,8 @@ The current web-only build deliberately has no desktop/native print bridge. For 
 - Temporary PDF files are deleted after successful printing; no R2 is used.
 - The bridge uses SumatraPDF 3.6.1 x64 for silent PDF printing.
 - Browser-only printing cannot do this; a local print bridge is required because normal web pages cannot directly enumerate/select local printers.
+
+
+V24 changes: compact A4 arrangement inside the file area; 5/10/12 images per A4 pricing; PDF page-by-page preview navigation with crop controls; PDF crop applies to all pages of that PDF; stronger per-file Preview buttons/thumbnails; smaller Owner Login card; Bengali voice slowed to 0.52 and waits for installed Bengali voice; Owner printer list refreshes automatically after login.
+
+Printer mapping: run install_bridge.bat on the shop Windows PC, enter the Worker URL and the same Bridge Key generated in Owner Settings, then run start_bridge.bat. In Owner > Automatic Printer Control, click Printer List Refresh, select the exact Windows B&W and Colour printer names, click Save Bridge Mapping, then Test B&W/Test Colour. Customer never sees a printer selector.

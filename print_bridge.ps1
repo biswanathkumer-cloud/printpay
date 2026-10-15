@@ -7,7 +7,15 @@ $CfgFile=Join-Path $Root 'bridge_config.json'
 if(!(Test-Path $CfgFile)){ '{"bw_printer":"","color_printer":"","paper":"A4","auto_print":true}' | Set-Content -Encoding UTF8 $CfgFile }
 function Cfg { return (Get-Content $CfgFile -Raw | ConvertFrom-Json) }
 function SaveCfg($c){$c|ConvertTo-Json|Set-Content -Encoding UTF8 $CfgFile}
-function Printers { @(Get-Printer | Select-Object Name,DriverName,PortName,PrinterStatus,Default) }
+function Printers {
+  try {
+    $p=@(Get-Printer -ErrorAction Stop | Select-Object Name,DriverName,PortName,PrinterStatus,Default)
+    if($p.Count -gt 0){ return $p }
+  } catch {}
+  try {
+    return @(Get-CimInstance Win32_Printer -ErrorAction Stop | Select-Object @{N='Name';E={$_.Name}},@{N='DriverName';E={$_.DriverName}},@{N='PortName';E={$_.PortName}},@{N='PrinterStatus';E={$_.PrinterStatus}},@{N='Default';E={$_.Default}})
+  } catch { return @() }
+}
 function Api($path,$method='GET',$body=$null){$h=@{'x-printpay-key'=$Key};if($body){$json=$body|ConvertTo-Json -Depth 10;return Invoke-RestMethod -Uri ($AppUrl+$path) -Method $method -Headers $h -ContentType 'application/json' -Body $json}else{return Invoke-RestMethod -Uri ($AppUrl+$path) -Method $method -Headers $h}}
 function PrintPdf($file,$printer){if(!(Test-Path $Sumatra)){throw 'SumatraPDF.exe missing. Run install_bridge.bat.'};if([string]::IsNullOrWhiteSpace($printer)){throw 'Printer is not configured.'};& $Sumatra -silent -exit-when-done -print-to $printer -print-settings 'paper=A4,fit' $file | Out-Null;if($LASTEXITCODE -ne 0){throw "SumatraPDF print failed: $LASTEXITCODE"}}
 function PollJobs {try{$d=Api '/api/print/jobs';foreach($j in @($d.jobs)){try{$c=Api '/api/print/claim' 'POST' @{order_id=$j.order_id;mode=$j.mode};if(!$c.ok){continue};$tmp=Join-Path $env:TEMP ('printpay_'+$j.order_id+'_'+$j.mode+'.pdf');$u=$AppUrl+'/api/print/file?'+[uri]::EscapeDataString('order_id')+'='+[uri]::EscapeDataString($j.order_id)+'&'+[uri]::EscapeDataString('mode')+'='+[uri]::EscapeDataString($j.mode);Invoke-WebRequest -Uri $u -Headers @{'x-printpay-key'=$Key} -OutFile $tmp;$cfg=Cfg;$printer=if($j.mode -eq 'bw'){$cfg.bw_printer}else{$cfg.color_printer};PrintPdf $tmp $printer;Api '/api/print/complete' 'POST' @{order_id=$j.order_id;mode=$j.mode}|Out-Null;Remove-Item $tmp -Force -ErrorAction SilentlyContinue}catch{try{Api '/api/print/fail' 'POST' @{order_id=$j.order_id;mode=$j.mode;error=$_.Exception.Message}|Out-Null}catch{} }}}catch{}}

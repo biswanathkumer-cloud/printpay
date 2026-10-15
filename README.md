@@ -46,3 +46,9 @@ The current web-only build deliberately has no desktop/native print bridge. For 
 V24 changes: compact A4 arrangement inside the file area; 5/10/12 images per A4 pricing; PDF page-by-page preview navigation with crop controls; PDF crop applies to all pages of that PDF; stronger per-file Preview buttons/thumbnails; smaller Owner Login card; Bengali voice slowed to 0.52 and waits for installed Bengali voice; Owner printer list refreshes automatically after login.
 
 Printer mapping: run install_bridge.bat on the shop Windows PC, enter the Worker URL and the same Bridge Key generated in Owner Settings, then run start_bridge.bat. In Owner > Automatic Printer Control, click Printer List Refresh, select the exact Windows B&W and Colour printer names, click Save Bridge Mapping, then Test B&W/Test Colour. Customer never sees a printer selector.
+
+V24.2 permanent bridge/voice improvements:
+- `install_bridge.bat` creates a Windows Scheduled Task named `PrintPay Print Bridge` so the bridge starts automatically at Windows user logon. It also starts the bridge immediately after setup.
+- Printer mapping is persisted in `bridge_config.json` on the shop PC and in D1 Owner Settings. The Owner panel refreshes the local Windows printer list automatically every 5 seconds while open.
+- Printer discovery uses `Get-Printer` and falls back to `Win32_Printer` so older Windows PrintManagement environments are supported better.
+- Bengali voice first uses a native `bn-IN` browser voice. If no Bengali voice is installed, it automatically falls back to Bengali TTS audio and plays it slowly. An internet connection is required for the fallback.

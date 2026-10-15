@@ -155,11 +155,19 @@ Write-Host 'Do not close this window.'
 Write-Host ''
 
 try {
+    # HttpListener has no Pending() method. Use BeginGetContext/EndGetContext
+    # so the bridge can keep polling print jobs without blocking HTTP requests.
+    $asyncContext = $null
     while ($listener.IsListening) {
         Poll-PrintJobs
 
-        if ($listener.Pending()) {
-            $context = $listener.GetContext()
+        if ($null -eq $asyncContext) {
+            $asyncContext = $listener.BeginGetContext($null, $null)
+        }
+
+        if ($asyncContext.AsyncWaitHandle.WaitOne(100)) {
+            $context = $listener.EndGetContext($asyncContext)
+            $asyncContext = $null
             $path = $context.Request.Url.AbsolutePath
             $method = $context.Request.HttpMethod
 
@@ -221,7 +229,7 @@ try {
             }
         }
 
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds 150
     }
 }
 finally {

@@ -10,7 +10,7 @@ async function ensureSchema(env){
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)').run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY,customer_name TEXT NOT NULL,mobile TEXT NOT NULL,pages INTEGER NOT NULL DEFAULT 1,copies INTEGER NOT NULL DEFAULT 1,print_mode TEXT NOT NULL DEFAULT 'bw',paper TEXT NOT NULL DEFAULT 'A4',amount_paise INTEGER NOT NULL DEFAULT 0,payment_method TEXT NOT NULL DEFAULT 'cash',payment_status TEXT NOT NULL DEFAULT 'PENDING',order_status TEXT NOT NULL DEFAULT 'PENDING',file_key TEXT,upload_token_hash TEXT,utr TEXT,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)").run();
 }
-async function ensureSettings(env){const d={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। ₹{amount} টাকা সংগ্রহ করে প্রিন্ট করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const [k,v] of Object.entries(d))await env.DB.prepare('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,v,now()).run()}
+async function ensureSettings(env){const d={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',bw_a4_sheet:'10',color_a4_sheet:'30',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। ₹{amount} টাকা সংগ্রহ করে প্রিন্ট করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const [k,v] of Object.entries(d))await env.DB.prepare('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,v,now()).run()}
 async function initOwner(env){
   await ensureSchema(env); await ensureSettings(env);
   const r=await env.DB.prepare("SELECT id FROM owners WHERE username='owner'").first();
@@ -22,7 +22,7 @@ async function initOwner(env){
 }
 async function makeSession(env){const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;const payload=`${Date.now()}.${crypto.randomUUID()}`;const sig=await hmac(secret,payload);return `pp_session=${encodeURIComponent(payload+'.'+sig)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`}
 async function isOwner(req,env){const c=req.headers.get('Cookie')||'';const m=c.match(/(?:^|;\s*)pp_session=([^;]+)/);if(!m)return false;const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;const raw=decodeURIComponent(m[1]);const p=raw.split('.');if(p.length<3)return false;const payload=p.slice(0,2).join('.'),sig=p.slice(2).join('.');const ts=Number(p[0]);if(!ts||Date.now()-ts>86400000)return false;return (await hmac(secret,payload))===sig}
-async function settings(env){await ensureSettings(env);const rs=await env.DB.prepare('SELECT key,value FROM settings').all();const o={};for(const r of rs.results)o[r.key]=r.value;const defaults={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। ₹{amount} টাকা সংগ্রহ করে প্রিন্ট করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const[k,v]of Object.entries(defaults))if(o[k]===undefined||String(o[k]).trim()==='')o[k]=v;return o}
+async function settings(env){await ensureSettings(env);const rs=await env.DB.prepare('SELECT key,value FROM settings').all();const o={};for(const r of rs.results)o[r.key]=r.value;const defaults={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',bw_a4_sheet:'10',color_a4_sheet:'30',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। ₹{amount} টাকা সংগ্রহ করে প্রিন্ট করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const[k,v]of Object.entries(defaults))if(o[k]===undefined||String(o[k]).trim()==='')o[k]=v;return o}
 async function publicSettings(env){return await settings(env)}
 async function markPaid(env,id){await env.DB.prepare("UPDATE orders SET payment_status='PAID',order_status='READY',updated_at=? WHERE id=?").bind(now(),id).run()}
 
@@ -54,20 +54,21 @@ if(p==='/api/order/status'&&req.method==='GET'){const id=String(u.searchParams.g
 if(p==='/api/order/create'&&req.method==='POST'){
  const b=await req.json(),name=String(b.customer_name||'').trim(),mobile=String(b.mobile||'').trim();
  if(!name||mobile.length<10)return json({ok:false,error:'Name and valid mobile required'},400);
- const s=await settings(env),copies=Math.max(1,Math.floor(Number(b.copies||1))),slots=[1,2,4,5,6,9,10,12].includes(Number(b.layout_slots))?Number(b.layout_slots):4;
- const items=Array.isArray(b.items)?b.items:[];if(!items.length)return json({ok:false,error:'At least one file is required'},400);
- const groups={bw:{pages:0,sheets:0,rate:0,amount:0},color:{pages:0,sheets:0,rate:0,amount:0}};
- for(const it of items){const m=it&&it.mode==='color'?'color':'bw';groups[m].pages+=Math.max(1,Number(it.pages||1))}
- for(const m of ['bw','color']){
-  const exact=Number(s[`${m}_a4_${slots}`]||0);let rate=exact;
-  if(rate<=0){rate=Number(s[m==='color'?'price_color':'price_bw']||0);if(copies>=25&&Number(s.tier_25)>0)rate=Number(s.tier_25);else if(copies>=10&&Number(s.tier_10)>0)rate=Number(s.tier_10);else if(copies>=5&&Number(s.tier_5)>0)rate=Number(s.tier_5);else if(copies>=1&&Number(s.tier_1)>0)rate=Number(s.tier_1)}
-  groups[m].rate=rate;groups[m].sheets=groups[m].pages?Math.ceil(groups[m].pages/slots):0;groups[m].amount=groups[m].sheets*rate*copies;
- }
- const subtotal=groups.bw.amount+groups.color.amount,discount=Math.max(0,Math.min(100,Number(s.global_discount||0))),delivery=Number(s.delivery||0),total=Math.max(0,Math.round((subtotal*(1-discount/100)+delivery)*100)/100);
+ const s=await settings(env),copies=Math.max(1,Math.floor(Number(b.copies||1)));
+ const items=Array.isArray(b.items)?b.items:[];if(!items.length)return json({ok:false,error:'At least one printable file is required'},400);
+ const groups={bw:{pages:0,sheets:0,rate:0,amount:0},color:{pages:0,sheets:0,rate:0,amount:0},a4_bw:{sheets:0,rate:Number(s.bw_a4_sheet||10),amount:0},a4_color:{sheets:0,rate:Number(s.color_a4_sheet||30),amount:0}};
+ for(const it of items){const m=it&&it.mode==='color'?'color':'bw';const kind=it&&it.kind==='a4'?'a4':'file';if(kind==='a4'){groups[m==='color'?'a4_color':'a4_bw'].sheets+=1}else groups[m].pages+=Math.max(1,Number(it.pages||1))}
+ groups.bw.rate=Number(s.price_bw||0);groups.color.rate=Number(s.price_color||0);
+ groups.bw.amount=groups.bw.pages*groups.bw.rate*copies;groups.color.amount=groups.color.pages*groups.color.rate*copies;
+ groups.a4_bw.amount=groups.a4_bw.sheets*groups.a4_bw.rate*copies;groups.a4_color.amount=groups.a4_color.sheets*groups.a4_color.rate*copies;
+ const subtotal=groups.bw.amount+groups.color.amount+groups.a4_bw.amount+groups.a4_color.amount,discount=Math.max(0,Math.min(100,Number(s.global_discount||0))),delivery=Number(s.delivery||0),total=Math.max(0,Math.round((subtotal*(1-discount/100)+delivery)*100)/100);
  const id='PP-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomUUID().slice(0,6).toUpperCase();
  const upload_token=crypto.randomUUID()+crypto.randomUUID(); const upload_token_hash=await sha256hex(upload_token);
- const notes=JSON.stringify({slots,copies,discount,delivery,sheets:groups.bw.sheets+groups.color.sheets,bw:groups.bw,color:groups.color,items:items.map(x=>({name:String(x.name||''),type:String(x.type||''),pages:Math.max(1,Number(x.pages||1)),mode:x.mode==='color'?'color':'bw'}))});
- await env.DB.prepare(`INSERT INTO orders(id,customer_name,mobile,pages,copies,print_mode,paper,amount_paise,payment_method,payment_status,order_status,created_at,updated_at,upload_token_hash,utr,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,name,mobile,groups.bw.pages+groups.color.pages,copies,(groups.bw.pages&&groups.color.pages)?'mixed':(groups.color.pages?'color':'bw'),String(b.paper||'A4'),Math.round(total*100),'cash','PENDING','PENDING',now(),now(),upload_token_hash,' ',notes).run();
+ const totalSheets=groups.a4_bw.sheets+groups.a4_color.sheets;
+ const notes=JSON.stringify({copies,discount,delivery,sheets:totalSheets,bw:groups.bw,color:groups.color,a4_bw:groups.a4_bw,a4_color:groups.a4_color,items:items.map(x=>({name:String(x.name||''),type:String(x.type||''),pages:Math.max(1,Number(x.pages||1)),mode:x.mode==='color'?'color':'bw',kind:x.kind==='a4'?'a4':'file'}))});
+ const pages=groups.bw.pages+groups.color.pages+totalSheets;
+ const printMode=(groups.bw.pages+groups.a4_bw.sheets&&groups.color.pages+groups.a4_color.sheets)?'mixed':((groups.color.pages+groups.a4_color.sheets)?'color':'bw');
+ await env.DB.prepare(`INSERT INTO orders(id,customer_name,mobile,pages,copies,print_mode,paper,amount_paise,payment_method,payment_status,order_status,created_at,updated_at,upload_token_hash,utr,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,name,mobile,pages,copies,printMode,String(b.paper||'A4'),Math.round(total*100),'cash','PENDING','PENDING',now(),now(),upload_token_hash,' ',notes).run();
  return json({ok:true,order_id:id,upload_token,amount:total,breakdown:groups});
 }
 

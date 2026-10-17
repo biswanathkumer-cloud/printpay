@@ -11,9 +11,17 @@ async function ensureSchema(env){
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY,customer_name TEXT NOT NULL,mobile TEXT NOT NULL,pages INTEGER NOT NULL DEFAULT 1,copies INTEGER NOT NULL DEFAULT 1,print_mode TEXT NOT NULL DEFAULT 'bw',paper TEXT NOT NULL DEFAULT 'A4',amount_paise INTEGER NOT NULL DEFAULT 0,payment_method TEXT NOT NULL DEFAULT 'cash',payment_status TEXT NOT NULL DEFAULT 'PENDING',order_status TEXT NOT NULL DEFAULT 'PENDING',file_key TEXT,upload_token_hash TEXT,utr TEXT,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)").run();
 }
 async function ensureSettings(env){const d={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। ₹{amount} টাকা সংগ্রহ করে প্রিন্ট করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const [k,v] of Object.entries(d))await env.DB.prepare('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,v,now()).run()}
-async function initOwner(env){await ensureSchema(env);await ensureSettings(env);const r=await env.DB.prepare("SELECT id FROM owners WHERE username='owner'").first();if(r)return;const initial=String(env.ADMIN_INITIAL_PASSWORD||'1234');const salt=crypto.randomUUID();const hash=await pbkdf2(initial,salt);await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run()}
-async function makeSession(env){const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD||'1234';const payload=`${Date.now()}.${crypto.randomUUID()}`;const sig=await hmac(secret,payload);return `pp_session=${encodeURIComponent(payload+'.'+sig)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`}
-async function isOwner(req,env){const c=req.headers.get('Cookie')||'';const m=c.match(/(?:^|;\s*)pp_session=([^;]+)/);if(!m)return false;const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD||'1234';const raw=decodeURIComponent(m[1]);const p=raw.split('.');if(p.length<3)return false;const payload=p.slice(0,2).join('.'),sig=p.slice(2).join('.');const ts=Number(p[0]);if(!ts||Date.now()-ts>86400000)return false;return (await hmac(secret,payload))===sig}
+async function initOwner(env){
+  await ensureSchema(env); await ensureSettings(env);
+  const r=await env.DB.prepare("SELECT id FROM owners WHERE username='owner'").first();
+  if(!r && !env.ADMIN_INITIAL_PASSWORD) return;
+  if(!r && env.ADMIN_INITIAL_PASSWORD){
+    const initial=String(env.ADMIN_INITIAL_PASSWORD),salt=crypto.randomUUID(),hash=await pbkdf2(initial,salt);
+    await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run();
+  }
+}
+async function makeSession(env){const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;const payload=`${Date.now()}.${crypto.randomUUID()}`;const sig=await hmac(secret,payload);return `pp_session=${encodeURIComponent(payload+'.'+sig)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`}
+async function isOwner(req,env){const c=req.headers.get('Cookie')||'';const m=c.match(/(?:^|;\s*)pp_session=([^;]+)/);if(!m)return false;const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;const raw=decodeURIComponent(m[1]);const p=raw.split('.');if(p.length<3)return false;const payload=p.slice(0,2).join('.'),sig=p.slice(2).join('.');const ts=Number(p[0]);if(!ts||Date.now()-ts>86400000)return false;return (await hmac(secret,payload))===sig}
 async function settings(env){await ensureSettings(env);const rs=await env.DB.prepare('SELECT key,value FROM settings').all();const o={};for(const r of rs.results)o[r.key]=r.value;const defaults={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে প্রিন্ট করার জন্য ফাইল পাঠিয়েছে। ₹{amount} টাকা সংগ্রহ করে প্রিন্ট করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const[k,v]of Object.entries(defaults))if(o[k]===undefined||String(o[k]).trim()==='')o[k]=v;return o}
 async function publicSettings(env){return await settings(env)}
 async function markPaid(env,id){await env.DB.prepare("UPDATE orders SET payment_status='PAID',order_status='READY',updated_at=? WHERE id=?").bind(now(),id).run()}
@@ -21,8 +29,22 @@ async function markPaid(env,id){await env.DB.prepare("UPDATE orders SET payment_
 export default {async fetch(req,env){try{await initOwner(env);const u=new URL(req.url),p=u.pathname;
 if(p==='/api/health')return json({ok:true,service:'PrintPay',storage:'temporary-files-only',time:now()});
 if(p==='/api/public-settings')return json(await publicSettings(env));
-if(p==='/api/owner/login'&&req.method==='POST'){const b=await req.json();const configuredPassword=String(env.ADMIN_INITIAL_PASSWORD||'1234');const username=String(b.username||'').trim();const password=String(b.password||'');if(username!=='owner'||!password)return json({ok:false,error:'Invalid login'},401);let row=await env.DB.prepare('SELECT * FROM owners WHERE username=?').bind(username).first();let valid=false;if(row){valid=(await pbkdf2(password,row.password_salt))===row.password_hash;}if(!valid && password===configuredPassword){const salt=crypto.randomUUID();const hash=await pbkdf2(initial,salt);if(row){await env.DB.prepare('UPDATE owners SET password_hash=?,password_salt=?,updated_at=? WHERE username=?').bind(hash,salt,now(),username).run();}else{await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run();}valid=true;}if(!valid)return json({ok:false,error:'Invalid login'},401);return json({ok:true},200,{'Set-Cookie':await makeSession(env)})}
-if(p==='/api/owner/logout')return json({ok:true},200,{'Set-Cookie':'pp_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'});
+if(p==='/api/owner/login'&&req.method==='POST'){
+ const b=await req.json(),username=String(b.username||'').trim(),password=String(b.password||'');
+ if(username!=='owner'||!password)return json({ok:false,error:'Owner username/password দিন।'},401);
+ if(!env.ADMIN_INITIAL_PASSWORD)return json({ok:false,error:'ADMIN_INITIAL_PASSWORD Cloudflare Secret-এ set করা হয়নি। Default password নেই।'},503);
+ let row=await env.DB.prepare('SELECT * FROM owners WHERE username=?').bind(username).first(),valid=false;
+ if(row)valid=(await pbkdf2(password,row.password_salt))===row.password_hash;
+ if(password===String(env.ADMIN_INITIAL_PASSWORD)){
+   const salt=crypto.randomUUID(),hash=await pbkdf2(password,salt);
+   if(row)await env.DB.prepare('UPDATE owners SET password_hash=?,password_salt=?,updated_at=? WHERE username=?').bind(hash,salt,now(),username).run();
+   else await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run();
+   valid=true;
+ }
+ if(!valid)return json({ok:false,error:'Owner password ভুল।'},401);
+ return json({ok:true},200,{'Set-Cookie':await makeSession(env)});
+}
+if(p==='/api/owner/logout' )return json({ok:true},200,{'Set-Cookie':'pp_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'});
 if(p==='/api/owner/settings'&&req.method==='GET'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);return json(await settings(env))}
 if(p==='/api/owner/settings'&&req.method==='POST'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);const b=await req.json();for(const[k,v]of Object.entries(b)){if(k==='session')continue;await env.DB.prepare('INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,String(v??''),now()).run()}return json({ok:true,settings:await settings(env)})}
 if(p==='/api/owner/orders'&&req.method==='GET'){if(!await isOwner(req,env))return json({ok:false,error:'Unauthorized'},401);const rs=await env.DB.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT 1000').all();return json(rs.results)}

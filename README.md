@@ -1,11 +1,26 @@
-# PrintPay V25 — Manual Owner Printing
+# PrintPay V27 — Manual Print + Private Owner Card Studio
 
-- Automatic Print Bridge removed completely.
-- Customer uploads are stored only temporarily in Durable Object storage until owner deletes them or 24 hours expires. No R2.
-- Customer selects B&W/Colour per file.
-- Owner logs in, marks Payment Received, previews each file with a clear B&W/Colour badge, opens it and prints manually.
-- Owner can delete individual files or all files after printing.
-- Owner login works with ADMIN_INITIAL_PASSWORD if configured; otherwise default initial password is `1234`. Set `ADMIN_INITIAL_PASSWORD` to your preferred password before production use.
-- Settings are saved in D1.
-- Logout is red and placed at the top-right.
-- QR poster is redesigned for customer understanding.
+## Added
+- Private **Card Studio** inside Owner Login only.
+- Image or PDF input; PDF page selection.
+- Card presets: PVC ID, Aadhaar Colour, PAN, Voter, Ration, Driving Licence, Ayushman Bharat, Custom.
+- Custom width/height in mm and 300/350/400/600 DPI output.
+- Automatic edge-based crop with centered aspect-ratio fallback.
+- High-resolution PNG/JPG save.
+- Exact-size browser print using selected mm dimensions.
+- Card Studio processing is browser-local; source files are not uploaded to D1/R2.
+
+## Existing workflow preserved
+- No automatic printer bridge.
+- Counter payment only.
+- Owner manually previews/prints customer files.
+- Temporary customer files remain in the existing Durable Object workflow and can be deleted by owner.
+- Owner password still comes from Cloudflare `ADMIN_INITIAL_PASSWORD`; no default password.
+
+## Verification
+- worker.js syntax check: passed
+- public/app.js syntax check: passed
+- owner.html inline JavaScript syntax check: passed
+- ZIP integrity check: passed
+
+Note: live Cloudflare deployment, real PDF rendering, and physical printer output were not tested in this environment.

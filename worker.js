@@ -1,4 +1,5 @@
 const te = new TextEncoder();
+let initPromise=null;
 function json(data,status=200,extra={}){return new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8',...extra}})}
 function now(){return new Date().toISOString()}
 function b64(buf){return btoa(String.fromCharCode(...new Uint8Array(buf)))}
@@ -12,17 +13,21 @@ async function ensureSchema(env){
 }
 async function ensureSettings(env){const d={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',upi_id:'',payment_name:'PrintPay',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',bw_a4_sheet:'0',color_a4_sheet:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে ফাইল পাঠিয়েছে। আপনি {amount} টাকা কালেক্ট করে এখন প্রিন্ট শুরু করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const [k,v] of Object.entries(d))await env.DB.prepare('INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,v,now()).run();const oldVoice=await env.DB.prepare("SELECT value FROM settings WHERE key='voice_message'").first();if(oldVoice?.value&&String(oldVoice.value).includes('₹{amount}'))await env.DB.prepare("UPDATE settings SET value=?,updated_at=? WHERE key='voice_message'").bind('গ্রাহক আপনাকে ফাইল পাঠিয়েছে। আপনি {amount} টাকা কালেক্ট করে এখন প্রিন্ট শুরু করে দিন।',now()).run();for(const[k,v]of [['price_bw','2'],['price_color','8']]){const row=await env.DB.prepare('SELECT value FROM settings WHERE key=?').bind(k).first();if(!row||String(row.value).trim()===''||String(row.value)==='0')await env.DB.prepare('INSERT OR REPLACE INTO settings(key,value,updated_at) VALUES(?,?,?)').bind(k,v,now()).run()}}
 async function initOwner(env){
-  await ensureSchema(env); await ensureSettings(env);
-  const r=await env.DB.prepare("SELECT id FROM owners WHERE username='owner'").first();
-  if(!r && !env.ADMIN_INITIAL_PASSWORD) return;
-  if(!r && env.ADMIN_INITIAL_PASSWORD){
-    const initial=String(env.ADMIN_INITIAL_PASSWORD),salt=crypto.randomUUID(),hash=await pbkdf2(initial,salt);
-    await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run();
-  }
+  if(initPromise) return initPromise;
+  initPromise=(async()=>{
+    await ensureSchema(env); await ensureSettings(env);
+    const r=await env.DB.prepare("SELECT id FROM owners WHERE username='owner'").first();
+    if(!r && !env.ADMIN_INITIAL_PASSWORD) return;
+    if(!r && env.ADMIN_INITIAL_PASSWORD){
+      const initial=String(env.ADMIN_INITIAL_PASSWORD),salt=crypto.randomUUID(),hash=await pbkdf2(initial,salt);
+      await env.DB.prepare("INSERT INTO owners(username,password_hash,password_salt,created_at,updated_at) VALUES('owner',?,?,?,?)").bind(hash,salt,now(),now()).run();
+    }
+  })();
+  return initPromise;
 }
 async function makeSession(env){const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;const payload=`${Date.now()}.${crypto.randomUUID()}`;const sig=await hmac(secret,payload);return `pp_session=${encodeURIComponent(payload+'.'+sig)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`}
 async function isOwner(req,env){const c=req.headers.get('Cookie')||'';const m=c.match(/(?:^|;\s*)pp_session=([^;]+)/);if(!m)return false;const secret=env.SESSION_SECRET||env.ADMIN_INITIAL_PASSWORD;const raw=decodeURIComponent(m[1]);const p=raw.split('.');if(p.length<3)return false;const payload=p.slice(0,2).join('.'),sig=p.slice(2).join('.');const ts=Number(p[0]);if(!ts||Date.now()-ts>86400000)return false;return (await hmac(secret,payload))===sig}
-async function settings(env){await ensureSettings(env);const rs=await env.DB.prepare('SELECT key,value FROM settings').all();const o={};for(const r of rs.results)o[r.key]=r.value;const defaults={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',upi_id:'',payment_name:'PrintPay',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',bw_a4_sheet:'0',color_a4_sheet:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে ফাইল পাঠিয়েছে। আপনি {amount} টাকা কালেক্ট করে এখন প্রিন্ট শুরু করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const[k,v]of Object.entries(defaults))if(o[k]===undefined||String(o[k]).trim()==='')o[k]=v;return o}
+async function settings(env){await initOwner(env);const rs=await env.DB.prepare('SELECT key,value FROM settings').all();const o={};for(const r of rs.results)o[r.key]=r.value;const defaults={business_name:'PrintPay',price_bw:'2',price_color:'8',delivery:'0',logo_url:'/printpay-logo.svg',upi_id:'',payment_name:'PrintPay',global_discount:'0',tier_1:'0',tier_5:'0',tier_10:'0',tier_25:'0',bw_a4_sheet:'0',color_a4_sheet:'0',voice_enabled:'1',voice_message:'গ্রাহক আপনাকে ফাইল পাঠিয়েছে। আপনি {amount} টাকা কালেক্ট করে এখন প্রিন্ট শুরু করে দিন।',bw_a4_1:'2',bw_a4_2:'4',bw_a4_4:'6',bw_a4_5:'7',bw_a4_6:'8',bw_a4_9:'10',bw_a4_10:'12',bw_a4_12:'14',color_a4_1:'8',color_a4_2:'16',color_a4_4:'24',color_a4_5:'28',color_a4_6:'32',color_a4_9:'40',color_a4_10:'44',color_a4_12:'50'};for(const[k,v]of Object.entries(defaults))if(o[k]===undefined||String(o[k]).trim()==='')o[k]=v;return o}
 async function publicSettings(env){return await settings(env)}
 async function markPaid(env,id){await env.DB.prepare("UPDATE orders SET payment_status='PAID',order_status='READY',updated_at=? WHERE id=?").bind(now(),id).run()}
 

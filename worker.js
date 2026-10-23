@@ -57,13 +57,13 @@ if(p==='/api/order/create'&&req.method==='POST'){
  const s=await settings(env),copies=Math.max(1,Math.floor(Number(b.copies||1)));
  const items=Array.isArray(b.items)?b.items:[];if(!items.length)return json({ok:false,error:'At least one printable file is required'},400);
  const groups={bw:{pages:0,pieces:0,sheets:0,rate:Number(s.price_bw||0),amount:0},color:{pages:0,pieces:0,sheets:0,rate:Number(s.price_color||0),amount:0}};
- for(const it of items){const m=it&&it.mode==='color'?'color':'bw';const kind=it&&it.kind==='a4'?'a4':'file';const pieces=Math.max(1,Number(it.pieces||it.pages||1));if(kind==='a4'){groups[m].pieces+=pieces;groups[m].sheets+=1;groups[m].pages+=1}else{const pages=Math.max(1,Number(it.pages||1));groups[m].pages+=pages;groups[m].pieces+=pages;}}
+ for(const it of items){const m=it&&it.mode==='color'?'color':'bw';const kind=it&&it.kind==='a4'?'a4':'file';const qty=Math.max(1,Math.floor(Number(it.qty||1)));const pieces=Math.max(1,Number(it.pieces||it.pages||1))*qty;if(kind==='a4'){groups[m].pieces+=pieces;groups[m].sheets+=1;groups[m].pages+=1}else{const pages=Math.max(1,Number(it.pages||1));groups[m].pages+=pages*qty;groups[m].pieces+=pages*qty;}}
  groups.bw.amount=groups.bw.pieces*groups.bw.rate*copies;groups.color.amount=groups.color.pieces*groups.color.rate*copies;
  const subtotal=groups.bw.amount+groups.color.amount,discount=Math.max(0,Math.min(100,Number(s.global_discount||0))),delivery=Number(s.delivery||0),total=Math.max(0,Math.round((subtotal*(1-discount/100)+delivery)*100)/100);
  const id='PP-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomUUID().slice(0,6).toUpperCase();
  const upload_token=crypto.randomUUID()+crypto.randomUUID(); const upload_token_hash=await sha256hex(upload_token);
  const totalSheets=groups.bw.sheets+groups.color.sheets;
- const notes=JSON.stringify({copies,discount,delivery,sheets:totalSheets,bw:groups.bw,color:groups.color,items:items.map(x=>({name:String(x.name||''),type:String(x.type||''),pages:Math.max(1,Number(x.pages||1)),pieces:Math.max(1,Number(x.pieces||x.pages||1)),mode:x.mode==='color'?'color':'bw',kind:x.kind==='a4'?'a4':'file'}))});
+ const notes=JSON.stringify({copies,discount,delivery,sheets:totalSheets,bw:groups.bw,color:groups.color,items:items.map(x=>({name:String(x.name||''),type:String(x.type||''),pages:Math.max(1,Number(x.pages||1)),pieces:Math.max(1,Number(x.pieces||x.pages||1)),qty:Math.max(1,Math.floor(Number(x.qty||1))),mode:x.mode==='color'?'color':'bw',kind:x.kind==='a4'?'a4':'file'}))});
  const pages=groups.bw.pages+groups.color.pages;
  const paymentMethod=['phonepe','googlepay','paytm'].includes(String(b.payment_method||''))?String(b.payment_method):'cash';
  const printMode=(groups.bw.pages&&groups.color.pages)?'mixed':(groups.color.pages?'color':'bw');
@@ -78,7 +78,7 @@ if(p==='/api/order/files/upload'&&req.method==='POST'){
  if(!row||!row.upload_token_hash||!(await sha256hex(token)===row.upload_token_hash))return json({ok:false,error:'Invalid upload token'},403);
  if(!fileId||!/^[a-zA-Z0-9_-]{1,80}$/.test(fileId)||typeof b.data!=='string'||!b.data)return json({ok:false,error:'Invalid file'},400);
  const stub=env.PRINT_ROOM.get(env.PRINT_ROOM.idFromName('print-files'));
- await stub.fetch('https://print-files/put-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({order_id:id,file_id:fileId,name:String(b.name||fileId),type:String(b.type||'application/octet-stream'),size:Number(b.size||0),mode:b.mode==='color'?'color':'bw',pages:Math.max(1,Number(b.pages||1)),pieces:Math.max(1,Number(b.pieces||b.pages||1)),data:b.data})});
+ await stub.fetch('https://print-files/put-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({order_id:id,file_id:fileId,name:String(b.name||fileId),type:String(b.type||'application/octet-stream'),size:Number(b.size||0),mode:b.mode==='color'?'color':'bw',pages:Math.max(1,Number(b.pages||1)),pieces:Math.max(1,Number(b.pieces||b.pages||1)),qty:Math.max(1,Math.floor(Number(b.qty||1))),data:b.data})});
  return json({ok:true,file_id:fileId});
 }
 if(p==='/api/owner/order-files'&&req.method==='GET'){
@@ -114,10 +114,10 @@ export class PrintRoom {
     if(p==='/put-file'&&req.method==='POST'){
       const b=await req.json(),id=String(b.order_id||''),fid=String(b.file_id||'');if(!id||!fid||typeof b.data!=='string')return json({ok:false,error:'Invalid file'},400);
       const key='f:'+id+':'+fid;const old=this.meta[key];if(old)await this.delChunks(key,old.chunks);
-      const chunks=await this.putChunks(key,b.data);this.meta[key]={order_id:id,file_id:fid,name:String(b.name||fid),type:String(b.type||'application/octet-stream'),size:Number(b.size||0),mode:b.mode==='color'?'color':'bw',pages:Math.max(1,Number(b.pages||1)),pieces:Math.max(1,Number(b.pieces||b.pages||1)),chunks,created:Date.now(),expires:Date.now()+86400000};await this.save();return json({ok:true});
+      const chunks=await this.putChunks(key,b.data);this.meta[key]={order_id:id,file_id:fid,name:String(b.name||fid),type:String(b.type||'application/octet-stream'),size:Number(b.size||0),mode:b.mode==='color'?'color':'bw',pages:Math.max(1,Number(b.pages||1)),pieces:Math.max(1,Number(b.pieces||b.pages||1)),qty:Math.max(1,Math.floor(Number(b.qty||1))),chunks,created:Date.now(),expires:Date.now()+86400000};await this.save();return json({ok:true});
     }
     if(p==='/list-files'){
-      const id=String(u.searchParams.get('order_id')||''),files=[];for(const [k,v] of Object.entries(this.meta)){if(v?.order_id===id&&v.file_id){if(v.expires<Date.now()){await this.delChunks(k,v.chunks);delete this.meta[k];continue}files.push({file_id:v.file_id,name:v.name,type:v.type,size:v.size,mode:v.mode,pages:v.pages,pieces:v.pieces||v.pages})}}await this.save();return json({ok:true,files});
+      const id=String(u.searchParams.get('order_id')||''),files=[];for(const [k,v] of Object.entries(this.meta)){if(v?.order_id===id&&v.file_id){if(v.expires<Date.now()){await this.delChunks(k,v.chunks);delete this.meta[k];continue}files.push({file_id:v.file_id,name:v.name,type:v.type,size:v.size,mode:v.mode,pages:v.pages,pieces:v.pieces||v.pages,qty:v.qty||1})}}await this.save();return json({ok:true,files});
     }
     if(p==='/get-file'){
       const id=String(u.searchParams.get('order_id')||''),fid=String(u.searchParams.get('file_id')||''),key='f:'+id+':'+fid,v=this.meta[key];if(!v)return json({ok:false,error:'File not found'},404);if(v.expires<Date.now()){await this.delChunks(key,v.chunks);delete this.meta[key];await this.save();return json({ok:false,error:'Temporary file expired'},410)}const data=await this.getChunks(key,v.chunks);const bin=atob(data),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return new Response(out,{headers:{'content-type':v.type||'application/octet-stream','content-disposition':`inline; filename="${encodeURIComponent(v.name)}"`,'cache-control':'no-store'}});

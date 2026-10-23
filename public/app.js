@@ -20,7 +20,7 @@ function breakdown(){
   return {out,subtotal,discount,delivery,total,pages:out.bw.pages+out.color.pages,sheets:out.a4_bw.sheets+out.a4_color.sheets,pieces:{bw:out.bw.pieces+out.a4_bw.pieces,color:out.color.pieces+out.a4_color.pieces}}
 }
 function calc(){const b=breakdown();if($('amount'))$('amount').textContent='₹'+b.total.toFixed(2).replace(/\.00$/,'');if($('rateInfo'))$('rateInfo').innerHTML=`🖤 B&W: ${b.pieces.bw} piece × ₹${b.out.bw.rate} = ₹${(b.pieces.bw*b.out.bw.rate).toFixed(2)}<br>🌈 Colour: ${b.pieces.color} piece × ₹${b.out.color.rate} = ₹${(b.pieces.color*b.out.color.rate).toFixed(2)}<br>🖼️ A4 layout: ${b.sheets} sheet • A4 editor শুধু layout, আলাদা sheet charge নেই<br><b>Per-file quantity set individually${b.delivery?` • Delivery: ₹${b.delivery}`:''}${b.discount?` • Discount: ${b.discount}%`:''}</b>`;return b}
-async function loadSettings(){try{const r=await fetch('/api/public-settings',{cache:'no-store'});settings=await r.json()}catch{settings={}}if($('brandName'))$('brandName').textContent=settings.business_name||'PrintPay';calc()}
+async function loadSettings(){try{const r=await fetch('/api/public-settings',{cache:'default'});settings=await r.json()}catch{settings={}}if($('brandName'))$('brandName').textContent=settings.business_name||'PrintPay';calc()}
 function cleanupLabel(e){e=cloneEdit(e);const a=[];if(n(e.brightness)!==0)a.push(`Brightness ${n(e.brightness)>0?'+':''}${n(e.brightness)}`);if(n(e.contrast)!==0)a.push(`Contrast ${n(e.contrast)>0?'+':''}${n(e.contrast)}`);if(n(e.scale,100)!==100)a.push(`Scale ${n(e.scale,100)}%`);if(n(e.sharpness)!==0)a.push(`Sharpness ${n(e.sharpness)}`);if(e.bwClean)a.push('B&W cleanup');const r=e.cropRect;if(r&&(r.x||r.y||r.w!==1||r.h!==1))a.push('Crop applied');return a.length?a.join(' • '):'No changes'}
 function renderFiles(){
   $('fileCount').textContent=`${selected.length} file${selected.length===1?'':'s'}`;
@@ -29,14 +29,14 @@ function renderFiles(){
 function renderA4Sheets(){const box=$('a4Sheets');if(!box)return;box.innerHTML=a4Sheets.map((f,i)=>`<div class="a4-sheet"><img src="${f.previewUrl}" alt="A4 sheet ${i+1}"><small>${modeOf(f)==='color'?'🌈 Colour':'🖤 B&W'} A4 • ${f.pieces||1} photo piece • Sheet ${i+1}</small><button type="button" data-a4remove="${i}" class="secondary" style="margin-top:6px;width:100%;padding:7px">Delete A4 page</button></div>`).join('');$('a4Summary').textContent=a4Sheets.length?`${a4Sheets.length} A4 page(s) ready • এগুলোর amount estimate-এ যোগ হয়েছে`:'কোনো A4 page তৈরি হয়নি'}
 $('a4Sheets').addEventListener('click',e=>{const b=e.target.closest('[data-a4remove]');if(!b)return;const i=Number(b.dataset.a4remove),f=a4Sheets[i];if(f?.previewUrl)URL.revokeObjectURL(f.previewUrl);a4Sheets.splice(i,1);renderA4Sheets();calc()});
 async function getPdfPages(file){try{return (await window.pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise).numPages}catch{return 1}}
-$('files').onchange=async e=>{const incoming=[...e.target.files];e.target.value='';if(!incoming.length)return;const start=selected.length;selected.push(...incoming.map(f=>Object.assign(f,{pages:1,qty:1,mode:'bw',_edit:cloneEdit(),_arranged:false})));renderFiles();for(let i=start;i<selected.length;i++)if(selected[i].type==='application/pdf')selected[i].pages=await getPdfPages(selected[i]);renderFiles();};
+$('files').onchange=async e=>{const incoming=[...e.target.files];e.target.value='';if(!incoming.length)return;const start=selected.length;selected.push(...incoming.map(f=>Object.assign(f,{pages:1,qty:1,mode:'bw',_edit:cloneEdit(),_arranged:false})));renderFiles();await Promise.all(selected.slice(start).map(async(f)=>{if(f.type==='application/pdf')f.pages=await getPdfPages(f)}));renderFiles();};
 async function addIncomingFiles(incoming,source='upload'){
   const files=[...incoming].filter(f=>f && ((f.type||'').startsWith('image/') || f.type==='application/pdf' || /\.(jpe?g|png|webp|gif|bmp|pdf)$/i.test(f.name||'')));
   if(!files.length)return 0;
   const start=selected.length;
   selected.push(...files.map(f=>Object.assign(f,{pages:1,qty:1,mode:'bw',_edit:cloneEdit(),_arranged:false})));
   renderFiles();
-  for(let i=start;i<selected.length;i++) if(selected[i].type==='application/pdf') selected[i].pages=await getPdfPages(selected[i]);
+  await Promise.all(selected.slice(start).map(async(f)=>{if(f.type==='application/pdf')f.pages=await getPdfPages(f)}));
   renderFiles();
   if($('uploadHint'))$('uploadHint').textContent=`✅ ${files.length}টি file ${source==='paste'?'paste':'upload'} হয়েছে। আরও file drag/drop বা Ctrl+V করতে পারেন।`;
   return files.length;
@@ -137,28 +137,75 @@ async function makeProcessedFile(item){
   const src=await sourceForFile(f,1),processed=applyImage(src,edit,item.mode,4200),blob=await canvasBlob(processed,'image/png');
   return new File([blob],f.name.replace(/\.[^.]+$/,'')+(item.mode==='bw'?'_BW':'_Edited')+'.png',{type:'image/png',lastModified:Date.now()});
 }
-async function uploadOrderFiles(items){if(!orderId||!uploadToken)return false;let done=0,next=0;const status=$('uploadHint');if(status)status.textContent=`ফাইল প্রস্তুত হচ্ছে… 0/${items.length}`;async function one(it,i){const processed=await makeProcessedFile(it),data=await blobToBase64(processed),payload={order_id:orderId,upload_token:uploadToken,file_id:'f'+i,name:processed.name,type:processed.type,size:processed.size,mode:it.mode,pages:it.pages,pieces:it.pieces||it.pages,qty:it.qty||1,kind:it.kind,data};let last='';for(let attempt=1;attempt<=2;attempt++){try{const r=await fetch('/api/order/files/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}),d=await r.json().catch(()=>({}));if(r.ok&&d.ok){done++;if(status)status.textContent=`ফাইল প্রস্তুত ও পাঠানো হচ্ছে… ${done}/${items.length}`;return}last=d.error||`HTTP ${r.status}`}catch(e){last=e.message||'Network error'}}throw new Error(`${it.name}: ${last}`)}async function worker(){while(next<items.length){const i=next++;await one(items[i],i)}}try{await Promise.all(Array.from({length:Math.min(2,items.length)},()=>worker()));return true}catch(e){console.error(e);if(status)status.textContent='❌ File upload হয়নি: '+(e.message||e);alert('কিছু file upload হয়নি: '+(e.message||e));return false}}
+async function uploadOrderFiles(items){
+ if(!orderId||!uploadToken)return false;
+ let done=0,next=0;
+ const status=$('uploadHint');
+ if(status)status.textContent=`⏳ File processing… 0/${items.length}`;
+ async function one(it,i){
+  const processed=await makeProcessedFile(it),data=await blobToBase64(processed),payload={order_id:orderId,upload_token:uploadToken,file_id:'f'+i,name:processed.name,type:processed.type,size:processed.size,mode:it.mode,pages:it.pages,pieces:it.pieces||it.pages,qty:it.qty||1,kind:it.kind,data};
+  let last='';
+  for(let attempt=1;attempt<=2;attempt++){
+   try{
+    const r=await fetch('/api/order/files/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}),d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok){done++;if(status)status.textContent=`⏳ File processing & sending… ${done}/${items.length}`;return true}
+    last=d.error||`HTTP ${r.status}`
+   }catch(e){last=e.message||'Network error'}
+  }
+  throw new Error(`${it.name}: ${last}`)
+ }
+ async function worker(){while(next<items.length){const i=next++;await one(items[i],i)}}
+ try{
+  // More parallelism for normal images; heavy PDFs are still bounded to avoid freezing mobile devices.
+  await Promise.all(Array.from({length:Math.min(3,items.length)},()=>worker()));
+  if(status)status.textContent='✅ File Successfully Sent';
+  return true
+ }catch(e){
+  console.error(e);if(status)status.textContent='⚠️ File upload এখনও চলছে/ব্যর্থ: '+(e.message||e);
+  showFastNotice('⚠️ Order নেওয়া হয়েছে। কিছু file এখনও processing হচ্ছে।','warn');
+  return false
+ }
+}
 async function createOrder(paymentMethod='cash'){
  const name=$('name').value.trim(),mobile=digits($('mobile').value.trim());$('mobile').value=mobile;
  if(!name||mobile.length<10){alert('নাম এবং সঠিক 10 digit mobile দিন।');return null}
- const items=printableItems();if(!items.length){alert('অন্তত একটি printable file রাখুন।');return null}if($('uploadHint'))$('uploadHint').textContent='⏳ ফাইল প্রস্তুত হচ্ছে… PDF হলে প্রতিটি page '+(items.some(x=>x.type==='application/pdf')?'process ও convert':'prepare')+' হবে।'
+ const items=printableItems();if(!items.length){alert('অন্তত একটি printable file রাখুন।');return null}
+ if($('uploadHint'))$('uploadHint').textContent='⏳ Order তৈরি হচ্ছে…';
  const b=calc();if(b.total<=0){alert('Owner panel-এ B&W/Colour প্রতি-piece price 0 আছে। আগে price set করুন।');return null}
  const r=await fetch('/api/order/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customer_name:name,mobile,paper:$('paper').value,copies:1,payment_method:paymentMethod,items:items.map(x=>({name:x.name,type:x.type,pages:x.pages,pieces:x.pieces,qty:x.qty||1,mode:x.mode,kind:x.kind}))})});
  const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok){alert(d.error||`Order তৈরি হয়নি (${r.status})`);return null}
- orderId=d.order_id;uploadToken=d.upload_token||'';if(!(await uploadOrderFiles(items)))return null;return d
+ orderId=d.order_id;uploadToken=d.upload_token||'';
+ return {d,items}
 }
 function paymentUplink(method,amount,id){const pa=String(settings.upi_id||'').trim();if(!pa)return '';const pn=String(settings.payment_name||settings.business_name||'PrintPay').trim();const tn='PrintPay '+id;return `upi://pay?pa=${encodeURIComponent(pa)}&pn=${encodeURIComponent(pn)}&am=${encodeURIComponent(Number(amount).toFixed(2))}&cu=INR&tn=${encodeURIComponent(tn)}`}
 function showOnlinePayment(d){$('upiArea').classList.remove('hidden');$('upiText').textContent=d.upi_id?` ${d.upi_id}`:' Owner UPI ID সেট করা হয়নি';$('upiStatus').textContent=d.upi_id?'নিচের Pay Now চাপুন অথবা QR scan করুন। Payment করার পরে UTR/Transaction ID পাঠান।':'Owner Login → Pricing/Payment Settings-এ UPI ID set করুন।';const q=$('upiQr');q.innerHTML='';const payUrl=paymentUplink(d.payment_method,d.amount,d.order_id);if(d.upi_id&&payUrl){const a=document.createElement('a');a.href=payUrl;a.className='upi-pay-link';a.textContent=`💳 Pay ₹${Number(d.amount).toFixed(2)} Now`;q.before(a);new QRCode(q,{text:payUrl,width:190,height:190,correctLevel:QRCode.CorrectLevel.M})}}
-function receiptHtml(amount,method,status='PAID',utr=''){const name=esc($('name').value.trim()),mobile=esc($('mobile').value.trim()),id=esc(orderId||'');return `<div class="receipt-inner"><div class="receipt-brand">🖨️ PrintPay</div><h3>Payment Received</h3><p>ফাইল সফলভাবে পাঠানো হয়েছে</p><hr><p><b>Order ID:</b> ${id}</p><p><b>Customer:</b> ${name}</p><p><b>Mobile:</b> ${mobile}</p><p><b>Amount:</b> ₹${Number(amount).toFixed(2)}</p><p><b>Payment:</b> ${esc(method)}</p>${utr?`<p><b>UTR:</b> ${esc(utr)}</p>`:''}<p><b>Status:</b> ${status}</p><p class="receipt-thanks">ধন্যবাদ। আপনার ফাইল Owner-এর Print queue-তে আছে।</p></div>`}
-function showReceipt(amount,method,utr=''){const card=$('receiptCard');card.innerHTML=receiptHtml(amount,method,'PAID',utr);card.classList.remove('hidden');$('receiptActions').classList.remove('hidden');}
+function receiptHtml(amount,method,status='PENDING',utr=''){const name=esc($('name').value.trim()),mobile=esc($('mobile').value.trim()),id=esc(orderId||'');const paidStatus=status==='PAID'?'Payment Received':'Counter Payment Submitted';return `<div class="receipt-inner"><div class="receipt-brand">🖨️ PrintPay</div><h3>${paidStatus}</h3><p>ফাইল সফলভাবে পাঠানো হয়েছে</p><hr><p><b>Order ID:</b> ${id}</p><p><b>Customer:</b> ${name}</p><p><b>Mobile:</b> ${mobile}</p><p><b>Amount:</b> ₹${Number(amount).toFixed(2)}</p><p><b>Payment:</b> ${esc(method)}</p>${utr?`<p><b>UTR:</b> ${esc(utr)}</p>`:''}<p><b>Status:</b> ${status==='PAID'?'PAID':'PENDING • Owner-এর কাছে counter payment দিতে হবে'}</p><p class="receipt-thanks">${status==='PAID'?'ধন্যবাদ। আপনার ফাইল Owner-এর Print queue-তে আছে।':'Counter payment request সফলভাবে নেওয়া হয়েছে। Owner payment receive করলে receipt PAID হবে।'}</p></div>`}
+function showReceipt(amount,method,utr='',status='PENDING'){const card=$('receiptCard');card.innerHTML=receiptHtml(amount,method,status,utr);card.classList.remove('hidden');$('receiptActions').classList.remove('hidden')}
 function saveReceiptFile(){const html=`<!doctype html><html lang="bn"><meta charset="utf-8"><title>PrintPay Payment Receipt</title><body style="font-family:Arial,sans-serif;padding:30px">${$('receiptCard').innerHTML}</body></html>`;const blob=new Blob([html],{type:'text/html;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=`PrintPay_Payment_Receipt_${orderId||Date.now()}.html`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
 function printReceipt(){const w=window.open('','_blank');if(!w)return;w.document.write(`<!doctype html><html lang="bn"><meta charset="utf-8"><title>PrintPay Payment Receipt</title><style>body{font-family:Arial,sans-serif;padding:30px}.receipt-inner{max-width:480px;margin:auto;border:2px solid #312e81;border-radius:18px;padding:24px}.receipt-brand{font-size:24px;font-weight:900;color:#312e81}.receipt-thanks{margin-top:22px;font-weight:700}</style>${$('receiptCard').innerHTML}<script>window.onload=()=>window.print()<\/script></html>`);w.document.close()}
-async function beginPayment(method){const btn=$(method==='cash'?'cash':method);if(btn)btn.disabled=true;try{const d=await createOrder(method);if(!d)return;paid=false;window.currentAmount=Number(d.amount||0);$('result').classList.remove('hidden');$('uploadHint').textContent='✅ File Successfully Sent • Order '+orderId;$('resultText').innerHTML=`<b>✅ File Successfully Sent</b><br>Order <b>${esc(orderId)}</b> • মোট ₹${window.currentAmount.toFixed(2)}<br>${method==='cash'?'কাউন্টারে টাকা দিন। Owner Payment Received করলে Payment Receipt পাওয়া যাবে।':'Owner-এর UPI-তে payment করুন। Payment verify হওয়ার পরে Owner Payment Received করবেন।'}`;if(method!=='cash')showOnlinePayment(d);startPaymentPolling()}finally{if(btn)btn.disabled=false}}
+function showFastNotice(message,type='ok'){const n=$('fastNotice');if(!n)return;n.className='fast-notice '+(type==='warn'?'warn':'ok');n.innerHTML=message;n.classList.add('show');clearTimeout(showFastNotice.t);showFastNotice.t=setTimeout(()=>n.classList.remove('show'),2600)}
+async function beginPayment(method){
+ const btn=$(method==='cash'?'cash':method);if(btn)btn.disabled=true;
+ try{
+  const pack=await createOrder(method);if(!pack)return;const {d,items}=pack;
+  paid=false;window.currentAmount=Number(d.amount||0);
+  $('result').classList.remove('hidden');
+  $('uploadHint').textContent='⏳ File processing & sending…';
+  $('resultText').innerHTML=`<b>✅ ${method==='cash'?'Counter Payment Successfully Submitted':'Order Successfully Created'}</b><br>Order <b>${esc(orderId)}</b> • মোট ₹${window.currentAmount.toFixed(2)}<br><span id="fileSendState">⏳ File processing হচ্ছে…</span><br>${method==='cash'?'কাউন্টারে টাকা দিন। Owner Payment Received করলে Receipt PAID হবে।':'Owner-এর UPI-তে payment করুন। Payment করার পরে UTR পাঠান।'}`;
+  showReceipt(window.currentAmount,method==='cash'?'counter':method,'','PENDING');
+  showFastNotice(`✅ ${method==='cash'?'Counter Payment':'Order'} Successfully Submitted • ${esc(orderId)}`);
+  if(method!=='cash')showOnlinePayment(d);
+  // Start status polling immediately; do not wait for file processing.
+  startPaymentPolling();
+  // Upload/process in background so the success dialogue appears immediately.
+  uploadOrderFiles(items).then(ok=>{const s=$('fileSendState');if(s)s.textContent=ok?'✅ File Successfully Sent':'⚠️ File processing এখনও চলছে।';});
+ }finally{if(btn)btn.disabled=false}
+}
 $('cash').onclick=()=>beginPayment('cash');$('phonepe').onclick=()=>beginPayment('phonepe');$('googlepay').onclick=()=>beginPayment('googlepay');$('paytm').onclick=()=>beginPayment('paytm');
 $('phonepe').addEventListener('click',()=>{});$('googlepay').addEventListener('click',()=>{});$('paytm').addEventListener('click',()=>{});
 $('submitUtr').onclick=async()=>{const utr=String($('utr').value||'').trim();if(!utr){alert('UTR / Transaction ID দিন।');return}if(!orderId||!uploadToken)return;const r=await fetch('/api/order/utr',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({order_id:orderId,upload_token:uploadToken,utr})});const d=await r.json().catch(()=>({}));$('upiStatus').textContent=r.ok&&d.ok?'UTR পাঠানো হয়েছে। Owner payment verify করে Payment Received করবেন।':(d.error||'UTR পাঠানো যায়নি।')};
 function speakBn(text){return new Promise(resolve=>{if(String(settings.voice_enabled)==='0'){resolve(false);return}const fallback=()=>{try{const spoken=String(text).replace(/\d+/g,m=>bnDigits(m));const a=new Audio('https://translate.google.com/translate_tts?ie=UTF-8&tl=bn&client=tw-ob&q='+encodeURIComponent(spoken));a.playbackRate=.68;a.onended=()=>resolve(true);a.onerror=()=>resolve(false);a.play().catch(()=>resolve(false))}catch{resolve(false)}};if(!('speechSynthesis'in window)){fallback();return}speechSynthesis.cancel();const speak=()=>{const spoken=String(text).replace(/\d+/g,m=>bnDigits(m));const u=new SpeechSynthesisUtterance(spoken);u.lang='bn-IN';u.rate=.46;u.pitch=1;u.volume=1;const vs=speechSynthesis.getVoices();const v=vs.find(x=>/^bn(-|_)/i.test(x.lang))||vs.find(x=>/bengali|bangla/i.test((x.name||'')+' '+(x.lang||'')));if(!v){fallback();return}u.voice=v;u.onend=()=>resolve(true);u.onerror=()=>fallback();speechSynthesis.speak(u)};if(speechSynthesis.getVoices().length)speak();else{speechSynthesis.onvoiceschanged=()=>{speechSynthesis.onvoiceschanged=null;speak()};setTimeout(()=>{if(speechSynthesis.getVoices().length)speak();else fallback()},1000)}})}
-function startPaymentPolling(){clearInterval(pollTimer);pollTimer=setInterval(async()=>{if(!orderId)return;try{const r=await fetch('/api/order/status?id='+encodeURIComponent(orderId),{cache:'no-store'}),d=await r.json();if(d.ok&&d.order.payment_status==='PAID'){clearInterval(pollTimer);paid=true;window.currentAmount=Number(d.order.amount_paise||0)/100;const msg=(settings.voice_message||'গ্রাহক আপনাকে ফাইল পাঠিয়েছে। আপনি {amount} টাকা কালেক্ট করে এখন প্রিন্ট শুরু করে দিন।').replace('{amount}',bnDigits(Number(window.currentAmount).toFixed(0)));$('resultText').innerHTML=`<b>✅ Payment Received</b><br>₹${window.currentAmount.toFixed(2)} • আপনার File successfully sent হয়েছে। Owner এখন B&W/Colour আলাদা করে print করবেন।`;showReceipt(window.currentAmount,d.order.payment_method||'counter',d.order.utr||'');await speakBn(msg)}}catch(e){console.error(e)}},2500)}
+function startPaymentPolling(){clearInterval(pollTimer);let busy=false;const check=async()=>{if(!orderId||busy)return;busy=true;try{const r=await fetch('/api/order/status?id='+encodeURIComponent(orderId),{cache:'no-store'}),d=await r.json();if(d.ok&&d.order.payment_status==='PAID'){clearInterval(pollTimer);paid=true;window.currentAmount=Number(d.order.amount_paise||0)/100;const msg=(settings.voice_message||'গ্রাহক আপনাকে ফাইল পাঠিয়েছে। আপনি {amount} টাকা কালেক্ট করে এখন প্রিন্ট শুরু করে দিন।').replace('{amount}',bnDigits(Number(window.currentAmount).toFixed(0)));$('resultText').innerHTML=`<b>✅ Payment Received</b><br>₹${window.currentAmount.toFixed(2)} • আপনার File successfully sent হয়েছে। Owner এখন B&W/Colour আলাদা করে print করবেন।`;showReceipt(window.currentAmount,d.order.payment_method||'counter',d.order.utr||'','PAID');showFastNotice('✅ Payment Received • Receipt PAID');await speakBn(msg)}}catch(e){console.error(e)}finally{busy=false}};check();pollTimer=setInterval(check,900)}
 loadSettings();
 
 $('saveReceipt').onclick=saveReceiptFile;$('printReceipt').onclick=printReceipt;

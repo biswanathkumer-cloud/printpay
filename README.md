@@ -34,3 +34,6 @@ Default new A4 Photo Sheet prices: B&W ₹10, Colour ₹30. These are owner-edit
 ## Security
 - Owner API endpoints remain protected by the existing owner session.
 - `ADMIN_INITIAL_PASSWORD` remains the required Cloudflare Worker secret; no default password is embedded.
+
+
+V27.2 update: PWA installation and mobile Share Target are intentionally disabled. Customer can still use Browse, Drag & Drop, and Ctrl+V/Paste from supported browser file sources.

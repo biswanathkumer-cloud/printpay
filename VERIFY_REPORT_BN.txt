@@ -1,0 +1,18 @@
+PrintPay V28.2 — local verification report
+
+PASS: public/app.js syntax (node --check)
+PASS: worker.js syntax (node --check)
+PASS: Owner inline JavaScript syntax (node --check)
+PASS: index.html and owner.html have no duplicate IDs
+PASS: short Order ID format remains in Worker
+PASS: PDF.js loads before public/app.js is inserted
+PASS: B&W mode is rendered into grayscale canvas pixels before upload
+PASS: multi-page PDFs are rebuilt page-by-page before upload
+PASS: Colour mode uses colour rendering before upload
+PASS: Owner has separate Report, Pricing, Payment, QR Code and Voice tabs
+PASS: temporary file upload progress is shown without a blocking success alert
+PASS: Worker settings defaults are batched to reduce cold-start D1 round trips
+
+NOT TESTED LIVE: Cloudflare deployment/D1, actual customer payment, Owner session on production,
+real two-page PDF download/render/print, physical printer output, Bengali speech/audio playback,
+and measured login latency. These require the deployed site and real browser/device conditions.
